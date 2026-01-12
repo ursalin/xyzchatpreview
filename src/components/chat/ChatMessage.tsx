@@ -1,14 +1,38 @@
-import { Message } from '@/types/chat';
+import { Message, VoiceConfig } from '@/types/chat';
 import { cn } from '@/lib/utils';
-import { User, Bot } from 'lucide-react';
+import { User, Bot, Volume2, VolumeX, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useState } from 'react';
 
 interface ChatMessageProps {
   message: Message;
   characterName?: string;
+  voiceConfig?: VoiceConfig;
+  onSpeak?: (text: string) => Promise<void>;
+  isPlaying?: boolean;
+  isProcessing?: boolean;
 }
 
-export function ChatMessage({ message, characterName = 'AI' }: ChatMessageProps) {
+export function ChatMessage({ 
+  message, 
+  characterName = 'AI',
+  voiceConfig,
+  onSpeak,
+  isPlaying,
+  isProcessing,
+}: ChatMessageProps) {
   const isUser = message.role === 'user';
+  const canSpeak = !isUser && voiceConfig?.enabled && voiceConfig?.minimaxApiKey && voiceConfig?.minimaxGroupId;
+
+  const handleSpeak = async () => {
+    if (onSpeak && canSpeak) {
+      try {
+        await onSpeak(message.content);
+      } catch (error) {
+        console.error('Failed to speak:', error);
+      }
+    }
+  };
 
   return (
     <div
@@ -47,6 +71,23 @@ export function ChatMessage({ message, characterName = 'AI' }: ChatMessageProps)
               minute: '2-digit',
             })}
           </span>
+          {canSpeak && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 ml-auto"
+              onClick={handleSpeak}
+              disabled={isProcessing}
+            >
+              {isProcessing ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : isPlaying ? (
+                <VolumeX className="w-3 h-3" />
+              ) : (
+                <Volume2 className="w-3 h-3" />
+              )}
+            </Button>
+          )}
         </div>
         <p className="whitespace-pre-wrap break-words">{message.content}</p>
       </div>
