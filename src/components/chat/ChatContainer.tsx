@@ -1,6 +1,7 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { useChat } from '@/hooks/useChat';
 import { useSettings } from '@/hooks/useSettings';
+import { useVoice } from '@/hooks/useVoice';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { SettingsPanel } from './SettingsPanel';
@@ -12,13 +13,47 @@ export function ChatContainer() {
   const { settings, updateSettings, buildSystemPrompt } = useSettings();
   const systemPrompt = buildSystemPrompt();
   const { messages, isLoading, sendMessage, clearMessages } = useChat(settings, systemPrompt);
+  const { 
+    isPlaying, 
+    isRecording, 
+    isProcessing: isVoiceProcessing,
+    speak, 
+    startRecording, 
+    stopRecording 
+  } = useVoice(settings.voiceConfig);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [currentPlayingId, setCurrentPlayingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
+
+  // Auto-speak new assistant messages if voice is enabled
+  useEffect(() => {
+    if (settings.voiceConfig.enabled && messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage.role === 'assistant' && !isLoading && lastMessage.content) {
+        // Auto-speak the latest response
+        handleSpeak(lastMessage.id, lastMessage.content);
+      }
+    }
+  }, [messages, isLoading, settings.voiceConfig.enabled]);
+
+  const handleSpeak = async (messageId: string, text: string) => {
+    if (currentPlayingId === messageId && isPlaying) {
+      setCurrentPlayingId(null);
+      return;
+    }
+    setCurrentPlayingId(messageId);
+    try {
+      await speak(text);
+    } catch (error) {
+      console.error('Speak error:', error);
+    }
+    setCurrentPlayingId(null);
+  };
 
   return (
     <div className="flex flex-col h-full bg-gradient-to-b from-background to-muted/20">
@@ -60,6 +95,10 @@ export function ChatContainer() {
                 key={message.id} 
                 message={message} 
                 characterName={settings.character.name}
+                voiceConfig={settings.voiceConfig}
+                onSpeak={(text) => handleSpeak(message.id, text)}
+                isPlaying={currentPlayingId === message.id && isPlaying}
+                isProcessing={currentPlayingId === message.id && isVoiceProcessing}
               />
             ))}
             {isLoading && messages[messages.length - 1]?.role === 'user' && (
@@ -76,7 +115,14 @@ export function ChatContainer() {
       </ScrollArea>
 
       {/* Input */}
-      <ChatInput onSend={sendMessage} isLoading={isLoading} />
+      <ChatInput 
+        onSend={sendMessage} 
+        isLoading={isLoading}
+        onStartRecording={startRecording}
+        onStopRecording={stopRecording}
+        isRecording={isRecording}
+        isProcessingVoice={isVoiceProcessing}
+      />
     </div>
   );
 }
