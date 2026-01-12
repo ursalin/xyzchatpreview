@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { AppSettings, defaultSettings } from '@/types/chat';
+import { AppSettings, defaultSettings, defaultVoiceConfig } from '@/types/chat';
 
 const SETTINGS_KEY = 'ai-companion-settings';
 
@@ -8,7 +8,12 @@ export function useSettings() {
     try {
       const saved = localStorage.getItem(SETTINGS_KEY);
       if (saved) {
-        return { ...defaultSettings, ...JSON.parse(saved) };
+        const parsed = JSON.parse(saved);
+        return { 
+          ...defaultSettings, 
+          ...parsed,
+          voiceConfig: { ...defaultVoiceConfig, ...parsed.voiceConfig }
+        };
       }
     } catch (e) {
       console.error('Failed to load settings:', e);

@@ -13,8 +13,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Settings, User, Key, Type } from 'lucide-react';
-import { AppSettings, defaultSettings, CharacterPreset, ApiConfig } from '@/types/chat';
+import { Settings, User, Key, Type, Volume2 } from 'lucide-react';
+import { AppSettings, defaultSettings, CharacterPreset, ApiConfig, VoiceConfig } from '@/types/chat';
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -48,6 +48,13 @@ export function SettingsPanel({ settings, onSettingsChange }: SettingsPanelProps
     }));
   };
 
+  const updateVoiceConfig = (updates: Partial<VoiceConfig>) => {
+    setLocalSettings(prev => ({
+      ...prev,
+      voiceConfig: { ...prev.voiceConfig, ...updates },
+    }));
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
@@ -59,12 +66,12 @@ export function SettingsPanel({ settings, onSettingsChange }: SettingsPanelProps
         <DialogHeader>
           <DialogTitle>设置</DialogTitle>
           <DialogDescription>
-            自定义应用标题、角色预设和API配置
+            自定义应用标题、角色预设、API配置和语音设置
           </DialogDescription>
         </DialogHeader>
 
         <Tabs defaultValue="general" className="mt-4">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="general" className="gap-1">
               <Type className="w-3 h-3" />
               <span className="hidden sm:inline">基本</span>
@@ -76,6 +83,10 @@ export function SettingsPanel({ settings, onSettingsChange }: SettingsPanelProps
             <TabsTrigger value="api" className="gap-1">
               <Key className="w-3 h-3" />
               <span className="hidden sm:inline">API</span>
+            </TabsTrigger>
+            <TabsTrigger value="voice" className="gap-1">
+              <Volume2 className="w-3 h-3" />
+              <span className="hidden sm:inline">语音</span>
             </TabsTrigger>
           </TabsList>
 
@@ -202,6 +213,75 @@ export function SettingsPanel({ settings, onSettingsChange }: SettingsPanelProps
                 <p className="font-medium mb-1">默认使用 Lovable AI</p>
                 <p className="text-muted-foreground">
                   当前使用内置的 Gemini 3 Flash 模型，无需配置。如需使用其他模型，请开启自定义API。
+                </p>
+              </div>
+            )}
+          </TabsContent>
+
+          {/* 语音设置 */}
+          <TabsContent value="voice" className="space-y-4 mt-4">
+            <div className="flex items-center justify-between rounded-lg border p-3 shadow-sm">
+              <div className="space-y-0.5">
+                <Label>启用语音输出</Label>
+                <p className="text-xs text-muted-foreground">
+                  使用 Minimax TTS 生成角色语音
+                </p>
+              </div>
+              <Switch
+                checked={localSettings.voiceConfig.enabled}
+                onCheckedChange={(checked) => updateVoiceConfig({ enabled: checked })}
+              />
+            </div>
+
+            {localSettings.voiceConfig.enabled && (
+              <>
+                <div className="grid gap-2">
+                  <Label htmlFor="minimaxApiKey">Minimax API Key</Label>
+                  <Input
+                    id="minimaxApiKey"
+                    type="password"
+                    value={localSettings.voiceConfig.minimaxApiKey}
+                    onChange={(e) => updateVoiceConfig({ minimaxApiKey: e.target.value })}
+                    placeholder="eyJhbGci..."
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    从 Minimax 控制台获取 API Key
+                  </p>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="minimaxGroupId">Group ID</Label>
+                  <Input
+                    id="minimaxGroupId"
+                    value={localSettings.voiceConfig.minimaxGroupId}
+                    onChange={(e) => updateVoiceConfig({ minimaxGroupId: e.target.value })}
+                    placeholder="1234567890"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Minimax 账户的 Group ID
+                  </p>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="voiceId">语音角色</Label>
+                  <Input
+                    id="voiceId"
+                    value={localSettings.voiceConfig.voiceId}
+                    onChange={(e) => updateVoiceConfig({ voiceId: e.target.value })}
+                    placeholder="female-tianmei"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    可选：female-tianmei, male-qn-qingse, female-shaonv 等
+                  </p>
+                </div>
+              </>
+            )}
+
+            {!localSettings.voiceConfig.enabled && (
+              <div className="rounded-lg bg-muted p-4 text-sm">
+                <p className="font-medium mb-1">语音功能已关闭</p>
+                <p className="text-muted-foreground">
+                  开启后需要配置 Minimax API，AI 回复将自动生成语音。
                 </p>
               </div>
             )}
