@@ -47,49 +47,74 @@ serve(async (req) => {
       throw new Error("No audio data provided");
     }
 
+    console.log("Processing audio for speech-to-text...");
+    console.log("Audio base64 length:", audio.length);
+
+    // Process audio in chunks
+    const binaryAudio = processBase64Chunks(audio);
+    console.log("Binary audio size:", binaryAudio.length);
+    
+    // Use Lovable AI Gateway for transcription
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
-    console.log("Processing audio for speech-to-text...");
+    // Convert audio to base64 for Lovable AI
+    let audioBase64 = "";
+    const chunkSize = 8192;
+    for (let i = 0; i < binaryAudio.length; i += chunkSize) {
+      const chunk = binaryAudio.slice(i, i + chunkSize);
+      let binary = "";
+      for (let j = 0; j < chunk.length; j++) {
+        binary += String.fromCharCode(chunk[j]);
+      }
+      audioBase64 += btoa(binary);
+    }
 
-    // Process audio in chunks
-    const binaryAudio = processBase64Chunks(audio);
-    
-    // Prepare form data for OpenAI Whisper API via Lovable gateway
-    const formData = new FormData();
-    const audioBuffer = binaryAudio.buffer as ArrayBuffer;
-    const blob = new Blob([audioBuffer], { type: "audio/webm" });
-    formData.append("file", blob, "audio.webm");
-    formData.append("model", "whisper-1");
-    formData.append("language", "zh");
-
-    // Use OpenAI Whisper API
-    const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    // Use Lovable AI Gateway with Gemini for audio transcription
+    const response = await fetch("https://api.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
       },
-      body: formData,
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "Please transcribe the following audio recording. Only output the transcribed text, nothing else. If you cannot understand the audio or it's empty, just respond with an empty string."
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:audio/webm;base64,${audioBase64}`
+                }
+              }
+            ]
+          }
+        ],
+        max_tokens: 1000,
+      }),
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("Whisper API error:", response.status, errorText);
-      
-      // Fallback: Try using Lovable AI for transcription
-      console.log("Falling back to Lovable AI for transcription...");
-      
-      // For now, return an error since we need proper STT support
-      throw new Error(`Speech-to-text error: ${response.status}`);
+      console.error("Lovable AI error:", response.status, errorText);
+      throw new Error(`Transcription error: ${response.status}`);
     }
 
     const result = await response.json();
-    console.log("Transcription result:", result.text?.substring(0, 50));
+    const transcribedText = result.choices?.[0]?.message?.content || "";
+    
+    console.log("Transcription result:", transcribedText.substring(0, 50));
 
     return new Response(
-      JSON.stringify({ text: result.text }),
+      JSON.stringify({ text: transcribedText }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       }
