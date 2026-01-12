@@ -9,7 +9,12 @@ import { Button } from '@/components/ui/button';
 import { Trash2, MessageCircle } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
-export function ChatContainer() {
+interface ChatContainerProps {
+  onSpeakingChange?: (isSpeaking: boolean) => void;
+  onMoodChange?: (mood: 'happy' | 'neutral' | 'thinking') => void;
+}
+
+export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerProps) {
   const { settings, updateSettings, buildSystemPrompt } = useSettings();
   const systemPrompt = buildSystemPrompt();
   const { messages, isLoading, sendMessage, clearMessages } = useChat(settings, systemPrompt);
@@ -23,6 +28,22 @@ export function ChatContainer() {
   } = useVoice(settings.voiceConfig);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [currentPlayingId, setCurrentPlayingId] = useState<string | null>(null);
+
+  // Notify parent about speaking state
+  useEffect(() => {
+    onSpeakingChange?.(isPlaying);
+  }, [isPlaying, onSpeakingChange]);
+
+  // Notify parent about mood based on loading state
+  useEffect(() => {
+    if (isLoading) {
+      onMoodChange?.('thinking');
+    } else if (isPlaying) {
+      onMoodChange?.('happy');
+    } else {
+      onMoodChange?.('neutral');
+    }
+  }, [isLoading, isPlaying, onMoodChange]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -56,10 +77,10 @@ export function ChatContainer() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-gradient-to-b from-background to-muted/20">
+    <div className="flex flex-col h-full bg-gradient-to-b from-background to-muted/20 md:pt-0 pt-[200px]">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-background/80 backdrop-blur-sm">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 ml-10 md:ml-10">
           <MessageCircle className="w-5 h-5 text-primary" />
           <h1 className="font-semibold">{settings.title}</h1>
         </div>
