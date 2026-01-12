@@ -5,27 +5,22 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Convert hex string to base64 in chunks to avoid stack overflow
+// Convert hex string to base64 properly
 function hexToBase64(hexString: string): string {
+  // Convert hex to bytes
   const bytes = new Uint8Array(hexString.length / 2);
   for (let i = 0; i < hexString.length; i += 2) {
     bytes[i / 2] = parseInt(hexString.substring(i, i + 2), 16);
   }
   
-  // Convert to base64 in chunks to avoid stack overflow
-  const chunkSize = 8192;
-  let base64 = "";
-  
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.slice(i, i + chunkSize);
-    let binary = "";
-    for (let j = 0; j < chunk.length; j++) {
-      binary += String.fromCharCode(chunk[j]);
-    }
-    base64 += btoa(binary);
+  // Convert entire byte array to binary string first
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
   }
   
-  return base64;
+  // Then convert the entire binary string to base64
+  return btoa(binary);
 }
 
 serve(async (req) => {
