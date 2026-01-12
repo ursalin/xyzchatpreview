@@ -6,6 +6,7 @@ interface AvatarPanelProps {
   isSpeaking: boolean;
   mood?: 'happy' | 'neutral' | 'thinking';
   characterName: string;
+  modelUrl?: string | null;
 }
 
 function LoadingFallback() {
@@ -13,13 +14,13 @@ function LoadingFallback() {
     <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-primary/5 to-secondary/5 rounded-2xl">
       <div className="flex flex-col items-center gap-3">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
-        <span className="text-sm text-muted-foreground">加载3D模型中...</span>
+        <span className="text-sm text-muted-foreground">初始化中...</span>
       </div>
     </div>
   );
 }
 
-export function AvatarPanel({ isSpeaking, mood = 'neutral', characterName }: AvatarPanelProps) {
+export function AvatarPanel({ isSpeaking, mood = 'neutral', characterName, modelUrl }: AvatarPanelProps) {
   return (
     <div className="relative w-full h-full min-h-[300px] bg-gradient-to-br from-background via-background to-primary/5 rounded-2xl overflow-hidden border border-border/50 shadow-xl">
       {/* Background decorations */}
@@ -31,7 +32,11 @@ export function AvatarPanel({ isSpeaking, mood = 'neutral', characterName }: Ava
       {/* 3D Canvas */}
       <div className="relative z-10 w-full h-full">
         <Suspense fallback={<LoadingFallback />}>
-          <Avatar3D isSpeaking={isSpeaking} mood={mood} />
+          <Avatar3D 
+            isSpeaking={isSpeaking} 
+            mood={mood} 
+            modelUrl={modelUrl}
+          />
         </Suspense>
       </div>
       
