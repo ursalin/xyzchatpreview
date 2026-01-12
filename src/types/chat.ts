@@ -27,10 +27,18 @@ export interface ApiConfig {
   model: string;
 }
 
+export interface VoiceConfig {
+  enabled: boolean;
+  minimaxApiKey: string;
+  minimaxGroupId: string;
+  voiceId: string;
+}
+
 export interface AppSettings {
   title: string;
   character: CharacterPreset;
   apiConfig: ApiConfig;
+  voiceConfig: VoiceConfig;
 }
 
 export const defaultCharacter: CharacterPreset = {
@@ -48,10 +56,18 @@ export const defaultApiConfig: ApiConfig = {
   model: '',
 };
 
+export const defaultVoiceConfig: VoiceConfig = {
+  enabled: false,
+  minimaxApiKey: '',
+  minimaxGroupId: '',
+  voiceId: 'female-tianmei',
+};
+
 export const defaultSettings: AppSettings = {
   title: 'AI 伴侣',
   character: defaultCharacter,
   apiConfig: defaultApiConfig,
+  voiceConfig: defaultVoiceConfig,
 };
 
 export const defaultPersonalities: Personality[] = [
