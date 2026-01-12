@@ -12,6 +12,48 @@ export interface Personality {
   systemPrompt: string;
 }
 
+export interface CharacterPreset {
+  id: string;
+  name: string;
+  persona: string;
+  background: string;
+  speakingStyle: string;
+}
+
+export interface ApiConfig {
+  useCustomApi: boolean;
+  apiEndpoint: string;
+  apiKey: string;
+  model: string;
+}
+
+export interface AppSettings {
+  title: string;
+  character: CharacterPreset;
+  apiConfig: ApiConfig;
+}
+
+export const defaultCharacter: CharacterPreset = {
+  id: 'default',
+  name: '小爱',
+  persona: '温柔体贴、善解人意的虚拟伴侣',
+  background: '一个充满爱心和智慧的AI伴侣，总是愿意倾听和陪伴',
+  speakingStyle: '温暖、亲切、自然',
+};
+
+export const defaultApiConfig: ApiConfig = {
+  useCustomApi: false,
+  apiEndpoint: '',
+  apiKey: '',
+  model: '',
+};
+
+export const defaultSettings: AppSettings = {
+  title: 'AI 伴侣',
+  character: defaultCharacter,
+  apiConfig: defaultApiConfig,
+};
+
 export const defaultPersonalities: Personality[] = [
   {
     id: 'gentle',
