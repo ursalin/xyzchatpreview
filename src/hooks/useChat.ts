@@ -1,8 +1,7 @@
 import { useState, useCallback } from 'react';
-import { Message, Personality } from '@/types/chat';
-import { supabase } from '@/integrations/supabase/client';
+import { Message, AppSettings } from '@/types/chat';
 
-export function useChat(personality: Personality) {
+export function useChat(settings: AppSettings, systemPrompt: string) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -18,23 +17,52 @@ export function useChat(personality: Personality) {
     setIsLoading(true);
 
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({
-            messages: [...messages, userMessage].map(m => ({
+      const { apiConfig } = settings;
+      
+      // Determine API endpoint and headers
+      let apiUrl: string;
+      let headers: Record<string, string>;
+      let body: Record<string, unknown>;
+
+      if (apiConfig.useCustomApi && apiConfig.apiEndpoint && apiConfig.apiKey) {
+        // Use custom API directly from frontend
+        apiUrl = apiConfig.apiEndpoint;
+        headers = {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiConfig.apiKey}`,
+        };
+        body = {
+          model: apiConfig.model || 'gpt-4o',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            ...[...messages, userMessage].map(m => ({
               role: m.role,
               content: m.content,
             })),
-            systemPrompt: personality.systemPrompt,
-          }),
-        }
-      );
+          ],
+          stream: true,
+        };
+      } else {
+        // Use Lovable AI via edge function
+        apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
+        headers = {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        };
+        body = {
+          messages: [...messages, userMessage].map(m => ({
+            role: m.role,
+            content: m.content,
+          })),
+          systemPrompt,
+        };
+      }
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
 
       if (!response.ok) {
         if (response.status === 429) {
@@ -42,6 +70,9 @@ export function useChat(personality: Personality) {
         }
         if (response.status === 402) {
           throw new Error('API额度已用完，请充值');
+        }
+        if (response.status === 401) {
+          throw new Error('API密钥无效，请检查设置');
         }
         throw new Error('AI回复失败');
       }
@@ -115,7 +146,7 @@ export function useChat(personality: Personality) {
     } finally {
       setIsLoading(false);
     }
-  }, [messages, personality.systemPrompt]);
+  }, [messages, settings, systemPrompt]);
 
   const clearMessages = useCallback(() => {
     setMessages([]);

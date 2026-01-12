@@ -4,9 +4,10 @@ import { User, Bot } from 'lucide-react';
 
 interface ChatMessageProps {
   message: Message;
+  characterName?: string;
 }
 
-export function ChatMessage({ message }: ChatMessageProps) {
+export function ChatMessage({ message, characterName = 'AI' }: ChatMessageProps) {
   const isUser = message.role === 'user';
 
   return (
@@ -20,7 +21,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
     >
       <div
         className={cn(
-          'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center',
+          'w-8 h-8 rounded-full flex items-center justify-center shrink-0',
           isUser ? 'bg-primary-foreground/20' : 'bg-primary/10'
         )}
       >
@@ -31,13 +32,23 @@ export function ChatMessage({ message }: ChatMessageProps) {
         )}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
-        <span className="text-xs opacity-60 mt-1 block">
-          {message.timestamp.toLocaleTimeString('zh-CN', {
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
-        </span>
+        <div className="flex items-center gap-2 mb-1">
+          <span className="font-medium text-sm">
+            {isUser ? '你' : characterName}
+          </span>
+          <span
+            className={cn(
+              'text-xs',
+              isUser ? 'text-primary-foreground/60' : 'text-muted-foreground'
+            )}
+          >
+            {message.timestamp.toLocaleTimeString('zh-CN', {
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </span>
+        </div>
+        <p className="whitespace-pre-wrap break-words">{message.content}</p>
       </div>
     </div>
   );
