@@ -5,6 +5,29 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Convert hex string to base64 in chunks to avoid stack overflow
+function hexToBase64(hexString: string): string {
+  const bytes = new Uint8Array(hexString.length / 2);
+  for (let i = 0; i < hexString.length; i += 2) {
+    bytes[i / 2] = parseInt(hexString.substring(i, i + 2), 16);
+  }
+  
+  // Convert to base64 in chunks to avoid stack overflow
+  const chunkSize = 8192;
+  let base64 = "";
+  
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.slice(i, i + chunkSize);
+    let binary = "";
+    for (let j = 0; j < chunk.length; j++) {
+      binary += String.fromCharCode(chunk[j]);
+    }
+    base64 += btoa(binary);
+  }
+  
+  return base64;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -56,7 +79,7 @@ serve(async (req) => {
     if (!response.ok) {
       const errorText = await response.text();
       console.error("Minimax API error:", response.status, errorText);
-      throw new Error(`Minimax API error: ${response.status}`);
+      throw new Error(`Minimax API error: ${response.status} - ${errorText}`);
     }
 
     const result = await response.json();
@@ -72,9 +95,12 @@ serve(async (req) => {
       throw new Error("No audio data in response");
     }
 
-    // Convert hex to base64
-    const bytes = new Uint8Array(audioHex.match(/.{1,2}/g).map((byte: string) => parseInt(byte, 16)));
-    const base64Audio = btoa(String.fromCharCode(...bytes));
+    console.log("Audio hex length:", audioHex.length);
+
+    // Convert hex to base64 using chunked approach
+    const base64Audio = hexToBase64(audioHex);
+
+    console.log("Base64 audio length:", base64Audio.length);
 
     return new Response(
       JSON.stringify({ audioContent: base64Audio }),
