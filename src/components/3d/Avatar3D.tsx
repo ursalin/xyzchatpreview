@@ -1,7 +1,10 @@
-import { useRef, useMemo } from 'react';
+import { useRef, useMemo, Suspense, useState, useCallback } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Environment, Float, Sphere, MeshDistortMaterial } from '@react-three/drei';
 import * as THREE from 'three';
+import { CharacterModel } from './CharacterModel';
+import { ModelLoader } from './ModelLoader';
+import { useModelLoader } from '@/hooks/useModelLoader';
 
 interface AvatarMeshProps {
   isSpeaking: boolean;
@@ -14,14 +17,10 @@ function AvatarMesh({ isSpeaking, mood = 'neutral' }: AvatarMeshProps) {
   const rightEyeRef = useRef<THREE.Mesh>(null);
   const mouthRef = useRef<THREE.Mesh>(null);
   
-  // Blinking animation
   const blinkTimer = useRef(0);
   const isBlinking = useRef(false);
-  
-  // Speaking animation
   const speakTimer = useRef(0);
 
-  // Colors based on mood
   const colors = useMemo(() => {
     switch (mood) {
       case 'happy':
@@ -36,11 +35,9 @@ function AvatarMesh({ isSpeaking, mood = 'neutral' }: AvatarMeshProps) {
   useFrame((state, delta) => {
     if (!groupRef.current) return;
     
-    // Gentle floating motion
     groupRef.current.position.y = Math.sin(state.clock.elapsedTime * 0.5) * 0.1;
     groupRef.current.rotation.y = Math.sin(state.clock.elapsedTime * 0.3) * 0.1;
     
-    // Blinking
     blinkTimer.current += delta;
     if (blinkTimer.current > 3 + Math.random() * 2) {
       isBlinking.current = true;
@@ -57,7 +54,6 @@ function AvatarMesh({ isSpeaking, mood = 'neutral' }: AvatarMeshProps) {
       }
     }
     
-    // Speaking animation
     if (mouthRef.current) {
       if (isSpeaking) {
         speakTimer.current += delta * 15;
@@ -74,7 +70,6 @@ function AvatarMesh({ isSpeaking, mood = 'neutral' }: AvatarMeshProps) {
 
   return (
     <group ref={groupRef}>
-      {/* Main head/body sphere with distortion */}
       <Float speed={2} rotationIntensity={0.2} floatIntensity={0.3}>
         <Sphere args={[1, 64, 64]}>
           <MeshDistortMaterial
@@ -88,7 +83,6 @@ function AvatarMesh({ isSpeaking, mood = 'neutral' }: AvatarMeshProps) {
         </Sphere>
       </Float>
       
-      {/* Inner glow sphere */}
       <Sphere args={[0.85, 32, 32]}>
         <meshStandardMaterial
           color={colors.glow}
@@ -99,49 +93,41 @@ function AvatarMesh({ isSpeaking, mood = 'neutral' }: AvatarMeshProps) {
         />
       </Sphere>
       
-      {/* Left eye */}
       <mesh ref={leftEyeRef} position={[-0.3, 0.2, 0.85]}>
         <sphereGeometry args={[0.12, 16, 16]} />
         <meshStandardMaterial color="#1a1a2e" />
       </mesh>
       
-      {/* Left eye highlight */}
       <mesh position={[-0.28, 0.24, 0.95]}>
         <sphereGeometry args={[0.04, 8, 8]} />
         <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={0.5} />
       </mesh>
       
-      {/* Right eye */}
       <mesh ref={rightEyeRef} position={[0.3, 0.2, 0.85]}>
         <sphereGeometry args={[0.12, 16, 16]} />
         <meshStandardMaterial color="#1a1a2e" />
       </mesh>
       
-      {/* Right eye highlight */}
       <mesh position={[0.32, 0.24, 0.95]}>
         <sphereGeometry args={[0.04, 8, 8]} />
         <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={0.5} />
       </mesh>
       
-      {/* Mouth */}
       <mesh ref={mouthRef} position={[0, -0.25, 0.9]}>
         <capsuleGeometry args={[0.08, 0.2, 8, 16]} />
         <meshStandardMaterial color="#ff6b9d" />
       </mesh>
       
-      {/* Blush left */}
       <mesh position={[-0.55, -0.05, 0.7]} rotation={[0, 0.3, 0]}>
         <circleGeometry args={[0.12, 16]} />
         <meshStandardMaterial color="#ff9ecd" transparent opacity={0.6} />
       </mesh>
       
-      {/* Blush right */}
       <mesh position={[0.55, -0.05, 0.7]} rotation={[0, -0.3, 0]}>
         <circleGeometry args={[0.12, 16]} />
         <meshStandardMaterial color="#ff9ecd" transparent opacity={0.6} />
       </mesh>
       
-      {/* Decorative floating particles */}
       {[...Array(6)].map((_, i) => (
         <Float key={i} speed={3 + i * 0.5} rotationIntensity={0.5} floatIntensity={0.8}>
           <mesh 
@@ -170,9 +156,49 @@ interface Avatar3DProps {
   isSpeaking: boolean;
   mood?: 'happy' | 'neutral' | 'thinking';
   className?: string;
+  modelUrl?: string | null;
 }
 
-export function Avatar3D({ isSpeaking, mood = 'neutral', className = '' }: Avatar3DProps) {
+export function Avatar3D({ isSpeaking, mood = 'neutral', className = '', modelUrl }: Avatar3DProps) {
+  const [modelLoaded, setModelLoaded] = useState(false);
+  const { progress, status, error, retry } = useModelLoader({
+    url: modelUrl || null,
+    timeout: 60000,
+    onLoad: () => setModelLoaded(true),
+  });
+
+  const handleModelLoaded = useCallback(() => {
+    setModelLoaded(true);
+  }, []);
+
+  // Show loader while loading external model
+  if (modelUrl && status === 'loading') {
+    return (
+      <div className={`w-full h-full ${className}`}>
+        <ModelLoader 
+          progress={progress} 
+          status={status}
+          error={error || undefined}
+          onRetry={retry}
+        />
+      </div>
+    );
+  }
+
+  // Show error state
+  if (modelUrl && status === 'error') {
+    return (
+      <div className={`w-full h-full ${className}`}>
+        <ModelLoader 
+          progress={progress} 
+          status={status}
+          error={error || undefined}
+          onRetry={retry}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className={`w-full h-full ${className}`}>
       <Canvas
@@ -190,7 +216,18 @@ export function Avatar3D({ isSpeaking, mood = 'neutral', className = '' }: Avata
           castShadow
         />
         
-        <AvatarMesh isSpeaking={isSpeaking} mood={mood} />
+        {modelUrl && status === 'success' ? (
+          <Suspense fallback={null}>
+            <CharacterModel 
+              url={modelUrl}
+              isSpeaking={isSpeaking} 
+              mood={mood}
+              onLoaded={handleModelLoaded}
+            />
+          </Suspense>
+        ) : (
+          <AvatarMesh isSpeaking={isSpeaking} mood={mood} />
+        )}
         
         <OrbitControls
           enableZoom={false}
