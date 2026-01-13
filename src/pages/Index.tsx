@@ -5,10 +5,8 @@ import { useSettings } from '@/hooks/useSettings';
 import { Button } from '@/components/ui/button';
 import { PanelLeftClose, PanelLeft } from 'lucide-react';
 
-// 将GLB文件上传到GitHub后，替换此URL
-// 格式示例: https://github.com/username/repo/releases/download/v1.0/model.glb
-// 或者使用 raw.githubusercontent.com 的链接
-const CHARACTER_MODEL_URL: string | null = null;
+// 3D角色模型URL
+const CHARACTER_MODEL_URL: string | null = 'https://media.githubusercontent.com/media/ursalin/3D-XYZ/main/XYZ.glb';
 
 const Index = () => {
   const { settings } = useSettings();
