@@ -5,8 +5,8 @@ import { useSettings } from '@/hooks/useSettings';
 import { Button } from '@/components/ui/button';
 import { PanelLeftClose, PanelLeft } from 'lucide-react';
 
-// 3D角色模型URL
-const CHARACTER_MODEL_URL: string | null = 'https://media.githubusercontent.com/media/ursalin/3D-XYZ/main/XYZ.glb';
+// 3D角色模型URL - 使用jsDelivr CDN加速访问GitHub文件
+const CHARACTER_MODEL_URL: string | null = 'https://cdn.jsdelivr.net/gh/ursalin/3D-XYZ@main/XYZ.glb';
 
 const Index = () => {
   const { settings } = useSettings();
