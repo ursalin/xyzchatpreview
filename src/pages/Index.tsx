@@ -5,8 +5,9 @@ import { useSettings } from '@/hooks/useSettings';
 import { Button } from '@/components/ui/button';
 import { PanelLeftClose, PanelLeft } from 'lucide-react';
 
-// 3D角色模型URL - 使用jsDelivr CDN加速访问GitHub文件
-const CHARACTER_MODEL_URL: string | null = 'https://cdn.jsdelivr.net/gh/ursalin/3D-XYZ@main/XYZ.glb';
+// 3D角色模型URL - 暂时禁用大模型，使用默认头像避免崩溃
+// 41MB的模型文件太大，需要压缩后再使用
+const CHARACTER_MODEL_URL: string | null = null;
 
 const Index = () => {
   const { settings } = useSettings();
