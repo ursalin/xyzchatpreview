@@ -13,127 +13,36 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
   isSpeaking = false,
   onImageLoaded 
 }) => {
-  const videoARef = useRef<HTMLVideoElement>(null);
-  const videoBRef = useRef<HTMLVideoElement>(null);
-  const isTransitioningRef = useRef(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [customVideo, setCustomVideo] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
-  const [active, setActive] = useState<'A' | 'B'>('A');
-  const [aOpacity, setAOpacity] = useState(1);
-  const [bOpacity, setBOpacity] = useState(0);
 
   const src = customVideo || idleVideo;
-  const CROSSFADE_SECONDS = 0.35;
 
-  // Seamless loop via double-buffer crossfade (prevents white/black frame at loop boundary)
+  // Simple native loop - no fade, no flash
   useEffect(() => {
-    const a = videoARef.current;
-    const b = videoBRef.current;
-    if (!a || !b) return;
+    const video = videoRef.current;
+    if (!video) return;
 
-    isTransitioningRef.current = false;
-    setActive('A');
-    setAOpacity(1);
-    setBOpacity(0);
-    setIsLoaded(false);
-
-    const prime = (v: HTMLVideoElement) => {
-      try {
-        v.pause();
-        v.currentTime = 0;
-        v.load();
-      } catch {
-        // ignore
-      }
+    // Force reload when source changes
+    video.load();
+    
+    const handleCanPlay = () => {
+      video.play().catch(() => {});
     };
 
-    prime(a);
-    prime(b);
-
-    const onCanPlay = () => {
-      void a.play().catch(() => {});
-    };
-
-    a.addEventListener('canplay', onCanPlay, { once: true });
-    return () => a.removeEventListener('canplay', onCanPlay);
+    video.addEventListener('canplay', handleCanPlay, { once: true });
+    return () => video.removeEventListener('canplay', handleCanPlay);
   }, [src]);
-
-  useEffect(() => {
-    const a = videoARef.current;
-    const b = videoBRef.current;
-    if (!a || !b) return;
-
-    const activeEl = active === 'A' ? a : b;
-    const nextEl = active === 'A' ? b : a;
-
-    const onTimeUpdate = () => {
-      if (isTransitioningRef.current) return;
-
-      const d = activeEl.duration;
-      if (!Number.isFinite(d) || d <= 0) return;
-
-      const remaining = d - activeEl.currentTime;
-      if (remaining <= CROSSFADE_SECONDS && remaining > 0) {
-        isTransitioningRef.current = true;
-
-        try {
-          nextEl.currentTime = 0;
-        } catch {
-          // ignore
-        }
-
-        nextEl.playbackRate = activeEl.playbackRate;
-        void nextEl.play().catch(() => {});
-
-        // kick crossfade on next frame to ensure nextEl has begun rendering
-        requestAnimationFrame(() => {
-          if (active === 'A') {
-            setAOpacity(0);
-            setBOpacity(1);
-          } else {
-            setAOpacity(1);
-            setBOpacity(0);
-          }
-        });
-
-        window.setTimeout(() => {
-          activeEl.pause();
-          try {
-            activeEl.currentTime = 0;
-          } catch {
-            // ignore
-          }
-
-          const next = active === 'A' ? 'B' : 'A';
-          setActive(next);
-
-          // ensure stable final state
-          if (next === 'A') {
-            setAOpacity(1);
-            setBOpacity(0);
-          } else {
-            setAOpacity(0);
-            setBOpacity(1);
-          }
-
-          isTransitioningRef.current = false;
-        }, CROSSFADE_SECONDS * 1000);
-      }
-    };
-
-    activeEl.addEventListener('timeupdate', onTimeUpdate);
-    return () => activeEl.removeEventListener('timeupdate', onTimeUpdate);
-  }, [active, src]);
 
   // Adjust playback rate based on speaking state
   useEffect(() => {
-    const rate = isSpeaking ? 1.15 : 1.0;
-    if (videoARef.current) videoARef.current.playbackRate = rate;
-    if (videoBRef.current) videoBRef.current.playbackRate = rate;
+    if (videoRef.current) {
+      videoRef.current.playbackRate = isSpeaking ? 1.15 : 1.0;
+    }
   }, [isSpeaking]);
-
 
   const handleVideoLoad = () => {
     setIsLoaded(true);
@@ -167,11 +76,12 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         className="hidden"
       />
       
-      {/* Double-buffer Videos (crossfade loop) */}
+      {/* Single video with native loop */}
       <video
-        ref={videoARef}
+        ref={videoRef}
         src={src}
         autoPlay
+        loop
         muted
         playsInline
         preload="auto"
@@ -179,25 +89,8 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         onLoadedData={handleVideoLoad}
         className="absolute inset-0 w-full h-full object-contain"
         style={{
-          opacity: aOpacity,
           filter: isSpeaking ? 'brightness(1.05)' : 'brightness(1)',
-          transition: `opacity ${Math.round(CROSSFADE_SECONDS * 1000)}ms linear, filter 0.3s ease`,
-        }}
-      />
-      <video
-        ref={videoBRef}
-        src={src}
-        autoPlay
-        muted
-        playsInline
-        preload="auto"
-        poster={posterImg}
-        onLoadedData={handleVideoLoad}
-        className="absolute inset-0 w-full h-full object-contain"
-        style={{
-          opacity: bOpacity,
-          filter: isSpeaking ? 'brightness(1.05)' : 'brightness(1)',
-          transition: `opacity ${Math.round(CROSSFADE_SECONDS * 1000)}ms linear, filter 0.3s ease`,
+          transition: 'filter 0.3s ease',
         }}
       />
 
@@ -229,7 +122,6 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
           <RefreshCw className="h-4 w-4" />
         </Button>
       </div>
-
     </div>
   );
 };
