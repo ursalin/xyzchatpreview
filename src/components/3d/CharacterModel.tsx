@@ -21,6 +21,78 @@ export function CharacterModel({ url, isSpeaking, mood = 'neutral', onLoaded }: 
   // Clone the scene to avoid sharing issues
   const clonedScene = useMemo(() => scene.clone(), [scene]);
 
+  // Auto-calculate bounding box, center and scale the model
+  const { scale, position } = useMemo(() => {
+    const box = new THREE.Box3().setFromObject(clonedScene);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    
+    // Target size for the model (height ~2 units)
+    const targetHeight = 2;
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const autoScale = maxDim > 0 ? targetHeight / maxDim : 1;
+    
+    // Center the model and place it on ground
+    const autoPosition = new THREE.Vector3(
+      -center.x * autoScale,
+      -box.min.y * autoScale, // Place on ground (y=0)
+      -center.z * autoScale
+    );
+    
+    console.log('[CharacterModel] 模型信息:', {
+      原始尺寸: { x: size.x.toFixed(2), y: size.y.toFixed(2), z: size.z.toFixed(2) },
+      自动缩放: autoScale.toFixed(4),
+      位置偏移: { x: autoPosition.x.toFixed(2), y: autoPosition.y.toFixed(2), z: autoPosition.z.toFixed(2) }
+    });
+    
+    return { scale: autoScale, position: autoPosition };
+  }, [clonedScene]);
+
+  // Debug materials and textures
+  useEffect(() => {
+    console.log('[CharacterModel] 开始分析材质和贴图...');
+    let materialCount = 0;
+    let textureCount = 0;
+    let missingTextureCount = 0;
+    
+    clonedScene.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const mesh = child as THREE.Mesh;
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        
+        materials.forEach((mat) => {
+          if (mat) {
+            materialCount++;
+            const material = mat as THREE.MeshStandardMaterial;
+            
+            // Check various texture maps
+            const textureTypes = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap'] as const;
+            
+            textureTypes.forEach((texType) => {
+              const texture = material[texType];
+              if (texture) {
+                textureCount++;
+                console.log(`[CharacterModel] ✓ ${mesh.name || '未命名网格'} - ${texType}: 已加载`);
+              }
+            });
+            
+            // Check for missing textures on standard materials
+            if (material.isMeshStandardMaterial && !material.map) {
+              missingTextureCount++;
+              console.log(`[CharacterModel] ⚠ ${mesh.name || '未命名网格'} - 无基础贴图，使用颜色:`, material.color?.getHexString());
+            }
+          }
+        });
+      }
+    });
+    
+    console.log('[CharacterModel] 材质分析完成:', {
+      材质数量: materialCount,
+      贴图数量: textureCount,
+      缺失贴图: missingTextureCount
+    });
+  }, [clonedScene]);
+
   // Notify when model is loaded
   useEffect(() => {
     onLoaded?.();
@@ -64,7 +136,7 @@ export function CharacterModel({ url, isSpeaking, mood = 'neutral', onLoaded }: 
 
     // Gentle breathing motion
     const breathe = Math.sin(state.clock.elapsedTime * 0.8) * 0.02;
-    groupRef.current.position.y = breathe;
+    groupRef.current.position.y = position.y + breathe;
 
     // Subtle head movement when speaking
     if (isSpeaking) {
@@ -87,8 +159,8 @@ export function CharacterModel({ url, isSpeaking, mood = 'neutral', onLoaded }: 
     <group ref={groupRef} dispose={null}>
       <primitive 
         object={clonedScene} 
-        scale={1}
-        position={[0, -1, 0]}
+        scale={scale}
+        position={[position.x, position.y, position.z]}
       />
     </group>
   );
