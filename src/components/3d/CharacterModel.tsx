@@ -11,6 +11,18 @@ interface CharacterModelProps {
   onLoaded?: () => void;
 }
 
+// 查找骨骼的辅助函数（支持模糊匹配）
+function findBoneByKeywords(skeleton: THREE.Skeleton | undefined, keywords: string[]): THREE.Bone | null {
+  if (!skeleton) return null;
+  for (const keyword of keywords) {
+    const bone = skeleton.bones.find(b => 
+      b.name.toLowerCase().includes(keyword.toLowerCase())
+    );
+    if (bone) return bone;
+  }
+  return null;
+}
+
 export function CharacterModel({ url, isSpeaking, mood = 'neutral', onLoaded }: CharacterModelProps) {
   const groupRef = useRef<THREE.Group>(null);
   const { scene, animations } = useGLTF(url);
@@ -18,24 +30,33 @@ export function CharacterModel({ url, isSpeaking, mood = 'neutral', onLoaded }: 
   
   // Animation timer
   const speakTimer = useRef(0);
+  const armsPoseApplied = useRef(false);
   
-  // ✅ 正确克隆带骨骼/蒙皮的模型（否则附件/头饰可能“分家”）
+  // 骨骼引用
+  const bonesRef = useRef<{
+    leftArm: THREE.Bone | null;
+    rightArm: THREE.Bone | null;
+    leftForeArm: THREE.Bone | null;
+    rightForeArm: THREE.Bone | null;
+  }>({ leftArm: null, rightArm: null, leftForeArm: null, rightForeArm: null });
+  
+  // ✅ 正确克隆带骨骼/蒙皮的模型
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
 
-  // 计算模型居中和缩放 - 不修改任何骨骼！
+  // 计算模型居中和缩放
   const { scale, position } = useMemo(() => {
     const box = new THREE.Box3().setFromObject(clonedScene);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
     
-    // 目标高度约2单位
-    const targetHeight = 2;
+    // 半身构图：目标高度约3单位（放大）
+    const targetHeight = 3;
     const autoScale = size.y > 0 ? targetHeight / size.y : 1;
     
-    // 居中模型
+    // 位置：略微下移让画面聚焦在上半身
     const autoPosition = new THREE.Vector3(
       -center.x * autoScale,
-      -center.y * autoScale, // 完全居中
+      (-center.y * autoScale) - 0.8, // 下移，让腰部以上为主
       -center.z * autoScale
     );
     
@@ -48,9 +69,40 @@ export function CharacterModel({ url, isSpeaking, mood = 'neutral', onLoaded }: 
     return { scale: autoScale, position: autoPosition };
   }, [clonedScene]);
 
+  // 查找骨骼并放下手臂
+  useEffect(() => {
+    let skeleton: THREE.Skeleton | null = null;
+    
+    clonedScene.traverse((child) => {
+      if ((child as THREE.SkinnedMesh).isSkinnedMesh) {
+        const skinnedMesh = child as THREE.SkinnedMesh;
+        if (skinnedMesh.skeleton && !skeleton) {
+          skeleton = skinnedMesh.skeleton;
+          
+          // 打印所有骨骼名称用于调试
+          console.log('[CharacterModel] 骨骼列表:', skeleton.bones.map(b => b.name).slice(0, 50), '...');
+          
+          // 查找手臂骨骼（适配多种命名规范）
+          bonesRef.current = {
+            leftArm: findBoneByKeywords(skeleton, ['L_Arm', 'Arm_L', 'LeftArm', 'Left_Arm', 'arm.l', 'L_UpperArm', 'UpperArm_L']),
+            rightArm: findBoneByKeywords(skeleton, ['R_Arm', 'Arm_R', 'RightArm', 'Right_Arm', 'arm.r', 'R_UpperArm', 'UpperArm_R']),
+            leftForeArm: findBoneByKeywords(skeleton, ['L_ForeArm', 'ForeArm_L', 'LeftForeArm', 'forearm.l', 'L_LowerArm']),
+            rightForeArm: findBoneByKeywords(skeleton, ['R_ForeArm', 'ForeArm_R', 'RightForeArm', 'forearm.r', 'R_LowerArm']),
+          };
+          
+          console.log('[CharacterModel] 找到手臂骨骼:', {
+            leftArm: bonesRef.current.leftArm?.name || '未找到',
+            rightArm: bonesRef.current.rightArm?.name || '未找到',
+            leftForeArm: bonesRef.current.leftForeArm?.name || '未找到',
+            rightForeArm: bonesRef.current.rightForeArm?.name || '未找到',
+          });
+        }
+      }
+    });
+  }, [clonedScene]);
+
   // Debug materials
   useEffect(() => {
-    console.log('[CharacterModel] 开始分析材质和贴图...');
     let materialCount = 0;
     let textureCount = 0;
     
@@ -58,24 +110,13 @@ export function CharacterModel({ url, isSpeaking, mood = 'neutral', onLoaded }: 
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
         const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        
         materials.forEach((mat) => {
           if (mat) {
             materialCount++;
             const material = mat as THREE.MeshStandardMaterial;
-            
-            const textureTypes = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap'] as const;
-            textureTypes.forEach((texType) => {
-              const texture = material[texType];
-              if (texture) {
-                textureCount++;
-                console.log(`[CharacterModel] ✓ ${mesh.name || '未命名'} - ${texType}: 已加载`);
-              }
+            ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap'].forEach((texType) => {
+              if ((material as any)[texType]) textureCount++;
             });
-            
-            if (material.isMeshStandardMaterial && !material.map) {
-              console.log(`[CharacterModel] ⚠ ${mesh.name || '未命名'} - 无基础贴图，颜色:`, material.color?.getHexString());
-            }
           }
         });
       }
@@ -104,12 +145,39 @@ export function CharacterModel({ url, isSpeaking, mood = 'neutral', onLoaded }: 
     };
   }, [actions]);
 
-  // 简单的呼吸和说话动画 - 只移动整体group，不动骨骼
+  // 动画循环
   useFrame((state, delta) => {
     if (!groupRef.current) return;
     
+    const bones = bonesRef.current;
+    
+    // 放下手臂（只执行一次）
+    if (!armsPoseApplied.current) {
+      if (bones.leftArm) {
+        // 左臂向下旋转（绕Z轴正方向 ~75度）
+        bones.leftArm.rotation.z = Math.PI * 0.42;
+        bones.leftArm.rotation.x = 0.05;
+      }
+      if (bones.leftForeArm) {
+        bones.leftForeArm.rotation.z = 0.15;
+      }
+      if (bones.rightArm) {
+        // 右臂向下旋转（绕Z轴负方向）
+        bones.rightArm.rotation.z = -Math.PI * 0.42;
+        bones.rightArm.rotation.x = 0.05;
+      }
+      if (bones.rightForeArm) {
+        bones.rightForeArm.rotation.z = -0.15;
+      }
+      
+      if (bones.leftArm || bones.rightArm) {
+        armsPoseApplied.current = true;
+        console.log('[CharacterModel] ✓ 手臂已放下');
+      }
+    }
+    
     // 轻微呼吸浮动
-    const breathe = Math.sin(state.clock.elapsedTime * 1.2) * 0.01;
+    const breathe = Math.sin(state.clock.elapsedTime * 1.2) * 0.008;
     groupRef.current.position.y = position.y + breathe;
 
     // 说话时轻微晃动

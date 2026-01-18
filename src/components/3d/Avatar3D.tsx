@@ -296,7 +296,7 @@ export function Avatar3D({ isSpeaking, mood = 'neutral', className = '', modelUr
 
       <ErrorBoundary>
         <Canvas
-          camera={{ position: [0, 0, 5], fov: 40 }}
+          camera={{ position: [0, 0.3, 2.8], fov: 45 }}
           dpr={[1, 1.5]}
           gl={{ antialias: true, powerPreference: 'high-performance' }}
           style={{ background: 'transparent' }}
