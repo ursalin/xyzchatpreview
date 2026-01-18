@@ -1,13 +1,9 @@
 import { useState } from 'react';
 import { ChatContainer } from '@/components/chat/ChatContainer';
-import { AvatarPanel } from '@/components/3d/AvatarPanel';
+import Live2DPanel from '@/components/live2d/Live2DPanel';
 import { useSettings } from '@/hooks/useSettings';
 import { Button } from '@/components/ui/button';
 import { PanelLeftClose, PanelLeft } from 'lucide-react';
-
-// 3D角色模型URL - 使用GitHub托管的压缩版GLB模型
-const CHARACTER_MODEL_URL: string | null = 
-  "https://raw.githubusercontent.com/ursalin/3D-XYZ/main/XYZ%EF%BC%81%E5%8E%8B%E7%BC%A9%E5%88%9D%E7%89%88.glb";
 
 const Index = () => {
   const { settings } = useSettings();
@@ -17,15 +13,10 @@ const Index = () => {
 
   return (
     <div className="h-screen w-full flex bg-background">
-      {/* 3D Avatar Panel */}
+      {/* Live2D Avatar Panel */}
       {showAvatar && (
         <div className="hidden md:flex w-1/2 lg:w-[45%] p-4 relative">
-          <AvatarPanel 
-            isSpeaking={isSpeaking} 
-            mood={mood}
-            characterName={settings.character.name}
-            modelUrl={CHARACTER_MODEL_URL}
-          />
+          <Live2DPanel isSpeaking={isSpeaking} />
         </div>
       )}
       
@@ -49,12 +40,7 @@ const Index = () => {
       
       {/* Mobile Avatar (shows at top on mobile) */}
       <div className="md:hidden fixed top-0 left-0 right-0 h-[200px] z-0">
-        <AvatarPanel 
-          isSpeaking={isSpeaking} 
-          mood={mood}
-          characterName={settings.character.name}
-          modelUrl={CHARACTER_MODEL_URL}
-        />
+        <Live2DPanel isSpeaking={isSpeaking} />
       </div>
     </div>
   );
