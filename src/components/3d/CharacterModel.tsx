@@ -9,6 +9,10 @@ interface CharacterModelProps {
   isSpeaking: boolean;
   mood?: 'happy' | 'neutral' | 'thinking';
   onLoaded?: () => void;
+  // 用户可调整的位置和缩放
+  offsetY?: number;
+  offsetX?: number;
+  zoom?: number;
 }
 
 // 查找骨骼的辅助函数（支持模糊匹配）
@@ -23,7 +27,7 @@ function findBoneByKeywords(skeleton: THREE.Skeleton | undefined, keywords: stri
   return null;
 }
 
-export function CharacterModel({ url, isSpeaking, mood = 'neutral', onLoaded }: CharacterModelProps) {
+export function CharacterModel({ url, isSpeaking, mood = 'neutral', onLoaded, offsetY = 0, offsetX = 0, zoom = 1 }: CharacterModelProps) {
   const groupRef = useRef<THREE.Group>(null);
   const { scene, animations } = useGLTF(url);
   const { actions, mixer } = useAnimations(animations, groupRef);
@@ -44,19 +48,19 @@ export function CharacterModel({ url, isSpeaking, mood = 'neutral', onLoaded }: 
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
 
   // 计算模型居中和缩放
-  const { scale, position } = useMemo(() => {
+  const { baseScale, basePosition } = useMemo(() => {
     const box = new THREE.Box3().setFromObject(clonedScene);
     const size = box.getSize(new THREE.Vector3());
     const center = box.getCenter(new THREE.Vector3());
     
-    // 半身构图：目标高度约3单位（放大）
-    const targetHeight = 3;
+    // 默认让模型适中显示
+    const targetHeight = 2.2;
     const autoScale = size.y > 0 ? targetHeight / size.y : 1;
     
-    // 位置：略微下移让画面聚焦在上半身
+    // 居中模型
     const autoPosition = new THREE.Vector3(
       -center.x * autoScale,
-      (-center.y * autoScale) - 0.8, // 下移，让腰部以上为主
+      -center.y * autoScale,
       -center.z * autoScale
     );
     
@@ -66,8 +70,16 @@ export function CharacterModel({ url, isSpeaking, mood = 'neutral', onLoaded }: 
       位置偏移: { x: autoPosition.x.toFixed(2), y: autoPosition.y.toFixed(2), z: autoPosition.z.toFixed(2) }
     });
     
-    return { scale: autoScale, position: autoPosition };
+    return { baseScale: autoScale, basePosition: autoPosition };
   }, [clonedScene]);
+  
+  // 应用用户调整
+  const finalScale = baseScale * zoom;
+  const finalPosition = useMemo(() => new THREE.Vector3(
+    basePosition.x + offsetX,
+    basePosition.y + offsetY,
+    basePosition.z
+  ), [basePosition, offsetX, offsetY]);
 
   // 查找骨骼并放下手臂
   useEffect(() => {
@@ -178,7 +190,7 @@ export function CharacterModel({ url, isSpeaking, mood = 'neutral', onLoaded }: 
     
     // 轻微呼吸浮动
     const breathe = Math.sin(state.clock.elapsedTime * 1.2) * 0.008;
-    groupRef.current.position.y = position.y + breathe;
+    groupRef.current.position.y = finalPosition.y + breathe;
 
     // 说话时轻微晃动
     if (isSpeaking) {
@@ -196,8 +208,8 @@ export function CharacterModel({ url, isSpeaking, mood = 'neutral', onLoaded }: 
     <group ref={groupRef} dispose={null}>
       <primitive 
         object={clonedScene} 
-        scale={scale}
-        position={[position.x, position.y, position.z]}
+        scale={finalScale}
+        position={[finalPosition.x, finalPosition.y, finalPosition.z]}
       />
     </group>
   );

@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { CharacterModel } from './CharacterModel';
 import { ModelLoader } from './ModelLoader';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { ZoomIn, ZoomOut, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, RotateCcw } from 'lucide-react';
 
 interface AvatarMeshProps {
   isSpeaking: boolean;
@@ -202,11 +203,17 @@ export function Avatar3D({ isSpeaking, mood = 'neutral', className = '', modelUr
   const [progress, setProgress] = useState(0);
   const [active, setActive] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  
+  // 用户可调整的位置和缩放
+  const [offsetY, setOffsetY] = useState(0);
+  const [offsetX, setOffsetX] = useState(0);
+  const [zoom, setZoom] = useState(1);
+  const [showControls, setShowControls] = useState(true);
 
   const deviceMemory = typeof navigator !== 'undefined' ? (navigator as any).deviceMemory : undefined;
   const isLowMemoryDevice = typeof deviceMemory === 'number' && deviceMemory > 0 && deviceMemory < 4;
 
-  // 低内存设备：默认不允许，但给“仍然加载”的强制入口（用户自担风险）
+  // 低内存设备：默认不允许，但给"仍然加载"的强制入口（用户自担风险）
   const allowExternalModel = !isLowMemoryDevice || forceExternalModel;
 
   const canOfferExternalModel = Boolean(modelUrl);
@@ -221,6 +228,10 @@ export function Avatar3D({ isSpeaking, mood = 'neutral', className = '', modelUr
     setProgress(0);
     setActive(false);
     setLoadError(null);
+    // 重置位置
+    setOffsetY(0);
+    setOffsetX(0);
+    setZoom(1);
   }, [modelUrl]);
 
   const handleModelLoaded = useCallback(() => {
@@ -235,11 +246,55 @@ export function Avatar3D({ isSpeaking, mood = 'neutral', className = '', modelUr
     setEnableExternalModel(true);
     setLoadAttempt((a) => a + 1);
   }, []);
+  
+  const handleReset = useCallback(() => {
+    setOffsetY(0);
+    setOffsetX(0);
+    setZoom(1);
+  }, []);
 
   const showLoaderOverlay = shouldRenderExternalModel && (active || (!modelLoaded && progress > 0) || loadError);
 
   return (
     <div className={`w-full h-full ${className} relative`}>
+      {/* 位置调整控制面板 */}
+      {shouldRenderExternalModel && modelLoaded && showControls && (
+        <div className="absolute top-2 right-2 z-20 flex flex-col gap-1 bg-background/80 backdrop-blur-sm rounded-lg p-2 border border-border/50">
+          <div className="flex gap-1 justify-center">
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setZoom(z => Math.min(z + 0.1, 2))}>
+              <ZoomIn className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setZoom(z => Math.max(z - 0.1, 0.3))}>
+              <ZoomOut className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="flex gap-1 justify-center">
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setOffsetY(y => y + 0.15)}>
+              <ArrowUp className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="flex gap-1 justify-center">
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setOffsetX(x => x - 0.15)}>
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleReset}>
+              <RotateCcw className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setOffsetX(x => x + 0.15)}>
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="flex gap-1 justify-center">
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setOffsetY(y => y - 0.15)}>
+              <ArrowDown className="h-4 w-4" />
+            </Button>
+          </div>
+          <p className="text-[10px] text-muted-foreground text-center mt-1">
+            缩放: {(zoom * 100).toFixed(0)}%
+          </p>
+        </div>
+      )}
+      
       {modelUrl && !enableExternalModel && (
         <div className="absolute inset-0 z-20 flex items-center justify-center p-6">
           <div className="max-w-[320px] w-full rounded-2xl border border-border/50 bg-background/80 backdrop-blur-sm shadow-lg p-4 text-center">
@@ -249,7 +304,7 @@ export function Avatar3D({ isSpeaking, mood = 'neutral', className = '', modelUr
             </p>
             {isLowMemoryDevice && (
               <p className="mt-2 text-xs text-destructive">
-                当前设备内存较小（deviceMemory&lt;4GB），可能加载失败或闪退；如需测试，可点“仍然加载”。
+                当前设备内存较小（deviceMemory&lt;4GB），可能加载失败或闪退；如需测试，可点"仍然加载"。
               </p>
             )}
             <div className="mt-4 flex gap-2 justify-center">
@@ -296,7 +351,7 @@ export function Avatar3D({ isSpeaking, mood = 'neutral', className = '', modelUr
 
       <ErrorBoundary>
         <Canvas
-          camera={{ position: [0, 0.3, 2.8], fov: 45 }}
+          camera={{ position: [0, 0.2, 3.5], fov: 45 }}
           dpr={[1, 1.5]}
           gl={{ antialias: true, powerPreference: 'high-performance' }}
           style={{ background: 'transparent' }}
@@ -322,6 +377,9 @@ export function Avatar3D({ isSpeaking, mood = 'neutral', className = '', modelUr
                   isSpeaking={isSpeaking}
                   mood={mood}
                   onLoaded={handleModelLoaded}
+                  offsetY={offsetY}
+                  offsetX={offsetX}
+                  zoom={zoom}
                 />
               </Suspense>
             </>
