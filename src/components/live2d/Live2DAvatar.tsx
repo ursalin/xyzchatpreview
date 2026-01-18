@@ -1,303 +1,303 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Button } from '@/components/ui/button';
-import { Upload, X, ZoomIn, ZoomOut, ArrowUp, ArrowDown, RotateCcw } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Upload, X, ZoomIn, ZoomOut, ArrowUp, ArrowDown, RotateCcw } from "lucide-react";
 
 interface Live2DAvatarProps {
   isSpeaking?: boolean;
   onImageLoaded?: () => void;
 }
 
-// Mesh grid configuration
-const GRID_COLS = 20;
-const GRID_ROWS = 30;
+type Hsl = { h: number; s: number; l: number };
 
-interface AnimationState {
-  time: number;
-  breathPhase: number;
-  blinkPhase: number;
-  isBlinking: boolean;
-  mouthOpen: number;
-  headTilt: number;
-  headNod: number;
+type AvatarMetrics = {
+  canvasW: number;
+  canvasH: number;
+  scale: number;
+  drawW: number;
+  drawH: number;
+  baseX: number; // top-left of image in canvas coords (before avatar transform)
+  baseY: number;
+};
+
+const DEFAULT_FEATURES = {
+  // These are normalized (0..1) relative to the image.
+  // They won't be perfect for every picture, but they won't deform the whole face.
+  eyeL: { x: 0.33, y: 0.215, w: 0.12, h: 0.05 },
+  eyeR: { x: 0.55, y: 0.215, w: 0.12, h: 0.05 },
+  mouth: { x: 0.43, y: 0.325, w: 0.14, h: 0.065 },
+} as const;
+
+function parseHslVar(raw: string): Hsl | null {
+  // expected formats like: "222.2 47.4% 11.2%" (Tailwind/Shadcn HSL variables)
+  const cleaned = raw.trim().replace(/,/g, " ");
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  if (parts.length < 3) return null;
+  const h = Number(parts[0]);
+  const s = Number(parts[1].replace("%", ""));
+  const l = Number(parts[2].replace("%", ""));
+  if ([h, s, l].some((n) => Number.isNaN(n))) return null;
+  return { h, s, l };
 }
 
-const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ 
-  isSpeaking = false,
-  onImageLoaded 
-}) => {
+function hsla(hsl: Hsl, a: number) {
+  return `hsla(${hsl.h}, ${hsl.s}%, ${hsl.l}%, ${a})`;
+}
+
+function roundedRectPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+) {
+  const radius = Math.max(0, Math.min(r, Math.min(w, h) / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + w - radius, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+  ctx.lineTo(x + w, y + h - radius);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+  ctx.lineTo(x + radius, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+}
+
+const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImageLoaded }) => {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [offsetY, setOffsetY] = useState(0);
   const [showControls, setShowControls] = useState(false);
-  
+
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const animationRef = useRef<number>(0);
-  const lastBlinkTime = useRef<number>(0);
-  const isSpeakingRef = useRef(isSpeaking);
+  const rafRef = useRef<number | null>(null);
+  const speakingRef = useRef(isSpeaking);
 
-  // Keep speaking ref updated
+  // Blink scheduler
+  const blinkRef = useRef({
+    nextAt: 0,
+    active: false,
+    startAt: 0,
+  });
+
+  // Theme colors for canvas overlays
+  const colorsRef = useRef<{ foreground: Hsl; primary: Hsl } | null>(null);
+
   useEffect(() => {
-    isSpeakingRef.current = isSpeaking;
+    speakingRef.current = isSpeaking;
   }, [isSpeaking]);
 
-  // Calculate deformed vertex position
-  const getDeformedVertex = useCallback((
-    x: number, 
-    y: number, 
-    imgWidth: number, 
-    imgHeight: number,
-    anim: AnimationState
-  ): [number, number] => {
-    const normalizedX = x / imgWidth; // 0 to 1
-    const normalizedY = y / imgHeight; // 0 to 1
-    
-    let dx = 0;
-    let dy = 0;
-
-    // === HEAD REGION (top 35%) ===
-    if (normalizedY < 0.35) {
-      const headInfluence = 1 - (normalizedY / 0.35);
-      
-      // Head tilt (side to side)
-      dx += anim.headTilt * 8 * headInfluence;
-      
-      // Head nod (slight up/down)
-      dy += anim.headNod * 3 * headInfluence;
-      
-      // === EYE REGION (15% - 25% from top, 25% - 75% from sides) ===
-      if (normalizedY > 0.15 && normalizedY < 0.28) {
-        const eyeRegionY = (normalizedY - 0.15) / 0.13; // 0 to 1 within eye region
-        const isLeftEye = normalizedX > 0.25 && normalizedX < 0.45;
-        const isRightEye = normalizedX > 0.55 && normalizedX < 0.75;
-        
-        if ((isLeftEye || isRightEye) && anim.isBlinking) {
-          // Squish eyes vertically when blinking
-          const eyeCenterY = 0.21;
-          const distFromCenter = normalizedY - eyeCenterY;
-          dy += distFromCenter * anim.blinkPhase * imgHeight * 0.15;
-        }
-      }
-      
-      // === MOUTH REGION (28% - 38% from top, center 40%) ===
-      if (normalizedY > 0.28 && normalizedY < 0.40 && normalizedX > 0.35 && normalizedX < 0.65) {
-        const mouthCenterY = 0.34;
-        const distFromMouthCenter = normalizedY - mouthCenterY;
-        
-        // Open mouth when speaking
-        if (distFromMouthCenter > 0) {
-          dy += anim.mouthOpen * 6 * (distFromMouthCenter / 0.06);
-        } else {
-          dy -= anim.mouthOpen * 2 * (-distFromMouthCenter / 0.06);
-        }
-      }
-    }
-    
-    // === CHEST/TORSO REGION (35% - 70%) - Breathing ===
-    if (normalizedY > 0.35 && normalizedY < 0.70) {
-      const chestInfluence = Math.sin((normalizedY - 0.35) / 0.35 * Math.PI);
-      const horizontalInfluence = 1 - Math.abs(normalizedX - 0.5) * 2;
-      
-      // Chest expansion (breathing)
-      const breathExpand = anim.breathPhase * chestInfluence * horizontalInfluence;
-      dx += (normalizedX - 0.5) * breathExpand * 12;
-      dy -= breathExpand * 4;
-    }
-    
-    // === SHOULDERS (35% - 45%) ===
-    if (normalizedY > 0.35 && normalizedY < 0.50) {
-      const shoulderInfluence = 1 - Math.abs(normalizedY - 0.42) / 0.08;
-      if (shoulderInfluence > 0) {
-        // Slight shoulder rise with breathing
-        dy -= anim.breathPhase * shoulderInfluence * 3;
-      }
-    }
-
-    // === GLOBAL SWAY ===
-    const swayAmount = Math.sin(anim.time * 0.5) * 2;
-    dx += swayAmount * (1 - normalizedY * 0.5);
-
-    return [x + dx, y + dy];
+  useEffect(() => {
+    const root = document.documentElement;
+    const st = getComputedStyle(root);
+    const fg = parseHslVar(st.getPropertyValue("--foreground")) ?? { h: 0, s: 0, l: 0 };
+    const pr = parseHslVar(st.getPropertyValue("--primary")) ?? { h: 220, s: 90, l: 55 };
+    colorsRef.current = { foreground: fg, primary: pr };
   }, []);
 
-  // Render the deformed mesh
-  const renderMesh = useCallback((anim: AnimationState) => {
+  const computeMetrics = useMemo(() => {
+    return () => {
+      const canvas = canvasRef.current;
+      const img = imageRef.current;
+      const container = containerRef.current;
+      if (!canvas || !img || !container) return null;
+
+      const canvasW = container.clientWidth;
+      const canvasH = container.clientHeight;
+
+      const imgW = img.naturalWidth;
+      const imgH = img.naturalHeight;
+
+      const scale =
+        Math.min(canvasW / imgW, (canvasH * 0.86) / imgH) * Math.max(0.1, Math.min(zoom, 2));
+
+      const drawW = imgW * scale;
+      const drawH = imgH * scale;
+
+      const baseX = (canvasW - drawW) / 2;
+      const baseY = (canvasH - drawH) / 2 + offsetY * 50;
+
+      return { canvasW, canvasH, scale, drawW, drawH, baseX, baseY } satisfies AvatarMetrics;
+    };
+  }, [zoom, offsetY]);
+
+  const renderFrame = (t: number) => {
     const canvas = canvasRef.current;
     const img = imageRef.current;
     if (!canvas || !img) return;
 
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const imgWidth = img.naturalWidth;
-    const imgHeight = img.naturalHeight;
+    const metrics = computeMetrics();
+    if (!metrics) return;
 
-    // Set canvas size to match container with zoom
-    const container = containerRef.current;
-    if (!container) return;
+    // Keep canvas in sync
+    if (canvas.width !== metrics.canvasW) canvas.width = metrics.canvasW;
+    if (canvas.height !== metrics.canvasH) canvas.height = metrics.canvasH;
 
-    const containerWidth = container.clientWidth;
-    const containerHeight = container.clientHeight;
+    const elapsed = t / 1000;
 
-    // Calculate display size maintaining aspect ratio
-    const scale = Math.min(
-      containerWidth / imgWidth,
-      (containerHeight * 0.85) / imgHeight
-    ) * zoom;
+    // === Animation values (small, natural) ===
+    const breath = (Math.sin(elapsed * 1.6) + 1) / 2; // 0..1
+    const breathY = (breath - 0.5) * 6; // px
+    const breathScale = 1 + (breath - 0.5) * 0.012;
 
-    const displayWidth = imgWidth * scale;
-    const displayHeight = imgHeight * scale;
+    const headSway = Math.sin(elapsed * 0.55) * (speakingRef.current ? 1.0 : 0.6);
+    const headTiltRad = (headSway * Math.PI) / 180; // degrees -> rad (tiny)
 
-    canvas.width = containerWidth;
-    canvas.height = containerHeight;
+    // Blink state
+    const now = performance.now();
+    if (blinkRef.current.nextAt === 0) {
+      blinkRef.current.nextAt = now + 1800 + Math.random() * 2600;
+    }
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Center offset
-    const offsetX = (containerWidth - displayWidth) / 2;
-    const baseOffsetY = (containerHeight - displayHeight) / 2 + offsetY * 50;
-
-    // Draw mesh triangles
-    const cellWidth = imgWidth / GRID_COLS;
-    const cellHeight = imgHeight / GRID_ROWS;
-
-    for (let row = 0; row < GRID_ROWS; row++) {
-      for (let col = 0; col < GRID_COLS; col++) {
-        // Source coordinates (texture)
-        const sx = col * cellWidth;
-        const sy = row * cellHeight;
-        const sw = cellWidth;
-        const sh = cellHeight;
-
-        // Get deformed corners
-        const [x0, y0] = getDeformedVertex(sx, sy, imgWidth, imgHeight, anim);
-        const [x1, y1] = getDeformedVertex(sx + sw, sy, imgWidth, imgHeight, anim);
-        const [x2, y2] = getDeformedVertex(sx + sw, sy + sh, imgWidth, imgHeight, anim);
-        const [x3, y3] = getDeformedVertex(sx, sy + sh, imgWidth, imgHeight, anim);
-
-        // Scale to display size
-        const dx0 = offsetX + x0 * scale;
-        const dy0 = baseOffsetY + y0 * scale;
-        const dx1 = offsetX + x1 * scale;
-        const dy1 = baseOffsetY + y1 * scale;
-        const dx2 = offsetX + x2 * scale;
-        const dy2 = baseOffsetY + y2 * scale;
-        const dx3 = offsetX + x3 * scale;
-        const dy3 = baseOffsetY + y3 * scale;
-
-        // Draw using two triangles per cell
-        // Triangle 1: top-left, top-right, bottom-left
-        drawTexturedTriangle(ctx, img,
-          sx, sy, sx + sw, sy, sx, sy + sh,
-          dx0, dy0, dx1, dy1, dx3, dy3
-        );
-        
-        // Triangle 2: top-right, bottom-right, bottom-left
-        drawTexturedTriangle(ctx, img,
-          sx + sw, sy, sx + sw, sy + sh, sx, sy + sh,
-          dx1, dy1, dx2, dy2, dx3, dy3
-        );
+    const blinkDuration = 140;
+    let blinkAmount = 0; // 0..1
+    if (!blinkRef.current.active && now >= blinkRef.current.nextAt) {
+      blinkRef.current.active = true;
+      blinkRef.current.startAt = now;
+    }
+    if (blinkRef.current.active) {
+      const p = (now - blinkRef.current.startAt) / blinkDuration;
+      if (p >= 1) {
+        blinkRef.current.active = false;
+        blinkRef.current.nextAt = now + 2000 + Math.random() * 3500;
+      } else {
+        // ease in/out blink
+        blinkAmount = Math.sin(Math.min(1, Math.max(0, p)) * Math.PI);
       }
     }
 
-    // Add glow effect when speaking
-    if (isSpeakingRef.current) {
+    // Mouth talking amount
+    let mouthOpen = 0;
+    if (speakingRef.current) {
+      mouthOpen =
+        (Math.sin(elapsed * 10.5) + 1) / 2 * 0.6 + (Math.sin(elapsed * 6.2) + 1) / 2 * 0.4;
+      mouthOpen = Math.min(1, Math.max(0, mouthOpen));
+    }
+
+    // === Draw ===
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Transform around the image bottom-center (feels more "body")
+    const originX = metrics.baseX + metrics.drawW / 2;
+    const originY = metrics.baseY + metrics.drawH * 0.95;
+
+    ctx.save();
+    ctx.translate(originX, originY);
+    ctx.rotate(headTiltRad * 0.18); // very subtle
+    ctx.scale(breathScale, breathScale);
+    ctx.translate(-originX, -originY);
+
+    // Draw the base image (NO WARP) with slight breathing vertical motion
+    ctx.drawImage(img, metrics.baseX, metrics.baseY + breathY, metrics.drawW, metrics.drawH);
+
+    // === Overlays (no image deformation) ===
+    const colors = colorsRef.current;
+    const fg = colors?.foreground ?? { h: 0, s: 0, l: 0 };
+    const pr = colors?.primary ?? { h: 220, s: 90, l: 55 };
+
+    // Blink eyelids (cover eyes briefly)
+    if (blinkAmount > 0.01) {
       ctx.save();
-      ctx.globalCompositeOperation = 'screen';
-      ctx.fillStyle = `hsla(var(--primary) / ${0.05 + anim.mouthOpen * 0.05})`;
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = hsla(fg, 0.55);
+
+      const drawEye = (eye: (typeof DEFAULT_FEATURES)["eyeL"]) => {
+        const ex = metrics.baseX + eye.x * metrics.drawW;
+        const ey = metrics.baseY + eye.y * metrics.drawH + breathY;
+        const ew = eye.w * metrics.drawW;
+        const eh = eye.h * metrics.drawH;
+
+        // eyelid height grows with blinkAmount
+        const lidH = eh * blinkAmount;
+        const centerY = ey + eh / 2;
+        const yTop = centerY - lidH / 2;
+
+        roundedRectPath(ctx, ex, yTop, ew, lidH, ew * 0.18);
+        ctx.fill();
+      };
+
+      drawEye(DEFAULT_FEATURES.eyeL);
+      drawEye(DEFAULT_FEATURES.eyeR);
+      ctx.restore();
+    }
+
+    // Mouth talking: draw a small dark "opening" + subtle highlight
+    if (mouthOpen > 0.01) {
+      const m = DEFAULT_FEATURES.mouth;
+      const mx = metrics.baseX + m.x * metrics.drawW;
+      const my = metrics.baseY + m.y * metrics.drawH + breathY;
+      const mw = m.w * metrics.drawW;
+      const mh = m.h * metrics.drawH;
+
+      const openH = mh * (0.25 + mouthOpen * 0.65);
+      const openY = my + mh * 0.35;
+
+      ctx.save();
+      ctx.globalCompositeOperation = "multiply";
+      ctx.fillStyle = hsla(fg, 0.35);
+      roundedRectPath(ctx, mx + mw * 0.18, openY, mw * 0.64, openH, mw * 0.22);
+      ctx.fill();
+
+      // tiny highlight (looks like lip sheen)
+      ctx.globalCompositeOperation = "screen";
+      ctx.fillStyle = hsla(pr, 0.12 + mouthOpen * 0.08);
+      roundedRectPath(ctx, mx + mw * 0.22, openY + openH * 0.15, mw * 0.56, openH * 0.18, mw * 0.2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Speaking glow (very subtle)
+    if (speakingRef.current) {
+      ctx.save();
+      ctx.globalCompositeOperation = "screen";
+      ctx.fillStyle = hsla(pr, 0.04);
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.restore();
     }
-  }, [getDeformedVertex, zoom, offsetY]);
 
-  // Animation loop
+    ctx.restore();
+
+    rafRef.current = requestAnimationFrame(renderFrame);
+  };
+
   useEffect(() => {
     if (!isLoaded) return;
-
-    let startTime = Date.now();
-    lastBlinkTime.current = startTime;
-
-    const animate = () => {
-      const now = Date.now();
-      const elapsed = (now - startTime) / 1000;
-
-      // Breathing: smooth sine wave
-      const breathPhase = (Math.sin(elapsed * 1.8) + 1) / 2; // 0 to 1
-
-      // Blinking: random intervals
-      let isBlinking = false;
-      let blinkPhase = 0;
-      const timeSinceLastBlink = now - lastBlinkTime.current;
-      
-      if (timeSinceLastBlink > 2500 + Math.random() * 3000) {
-        lastBlinkTime.current = now;
-      }
-      
-      const blinkDuration = 150;
-      const blinkElapsed = now - lastBlinkTime.current;
-      if (blinkElapsed < blinkDuration) {
-        isBlinking = true;
-        // Quick close then open
-        blinkPhase = Math.sin((blinkElapsed / blinkDuration) * Math.PI);
-      }
-
-      // Mouth animation when speaking
-      let mouthOpen = 0;
-      if (isSpeakingRef.current) {
-        // Rapid mouth movement
-        mouthOpen = (Math.sin(elapsed * 12) + 1) / 2 * 0.7 + 
-                    (Math.sin(elapsed * 8.5) + 1) / 2 * 0.3;
-      }
-
-      // Head movement
-      const headTilt = Math.sin(elapsed * 0.7) * 0.3 + 
-                       (isSpeakingRef.current ? Math.sin(elapsed * 2.5) * 0.2 : 0);
-      const headNod = Math.sin(elapsed * 0.5) * 0.2 +
-                      (isSpeakingRef.current ? Math.sin(elapsed * 3) * 0.15 : 0);
-
-      const animState: AnimationState = {
-        time: elapsed,
-        breathPhase,
-        blinkPhase,
-        isBlinking,
-        mouthOpen,
-        headTilt,
-        headNod,
-      };
-
-      renderMesh(animState);
-      animationRef.current = requestAnimationFrame(animate);
-    };
-
-    animate();
-
+    rafRef.current = requestAnimationFrame(renderFrame);
     return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
+    
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
     };
-  }, [isLoaded, renderMesh]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoaded, computeMetrics]);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file && file.type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          imageRef.current = img;
-          setImageSrc(e.target?.result as string);
-          setIsLoaded(true);
-          setShowControls(true);
-          onImageLoaded?.();
-        };
-        img.src = e.target?.result as string;
+    if (!file || !file.type.startsWith("image/")) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const url = e.target?.result as string;
+      const img = new Image();
+      img.onload = () => {
+        imageRef.current = img;
+        setImageSrc(url);
+        setIsLoaded(true);
+        setShowControls(true);
+        onImageLoaded?.();
       };
-      reader.readAsDataURL(file);
-    }
+      img.src = url;
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleClear = () => {
@@ -307,6 +307,7 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({
     setZoom(1);
     setOffsetY(0);
     imageRef.current = null;
+    blinkRef.current = { nextAt: 0, active: false, startAt: 0 };
   };
 
   const handleReset = () => {
@@ -315,7 +316,7 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({
   };
 
   return (
-    <div 
+    <div
       ref={containerRef}
       className="relative w-full h-full flex items-center justify-center overflow-hidden bg-gradient-to-b from-background/50 to-background"
     >
@@ -325,14 +326,11 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({
             <Upload className="w-12 h-12 text-muted-foreground/50" />
           </div>
           <p className="text-muted-foreground text-center text-sm">
-            上传游戏角色图片<br />
-            <span className="text-xs opacity-70">支持 PNG、JPG（推荐正面半身像）</span>
+            上传游戏角色图片
+            <br />
+            <span className="text-xs opacity-70">建议：正面半身照（脸更居中效果更好）</span>
           </p>
-          <Button 
-            variant="outline"
-            onClick={() => fileInputRef.current?.click()}
-            className="gap-2"
-          >
+          <Button variant="outline" onClick={() => fileInputRef.current?.click()} className="gap-2">
             <Upload className="w-4 h-4" />
             选择图片
           </Button>
@@ -346,11 +344,7 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({
         </div>
       ) : (
         <>
-          <canvas
-            ref={canvasRef}
-            className="w-full h-full"
-            style={{ imageRendering: 'auto' }}
-          />
+          <canvas ref={canvasRef} className="w-full h-full" style={{ imageRendering: "auto" }} />
 
           <Button
             variant="ghost"
@@ -367,7 +361,7 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8"
-                onClick={() => setZoom(z => Math.min(z + 0.1, 2))}
+                onClick={() => setZoom((z) => Math.min(z + 0.1, 2))}
               >
                 <ZoomIn className="w-4 h-4" />
               </Button>
@@ -375,7 +369,7 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8"
-                onClick={() => setZoom(z => Math.max(z - 0.1, 0.3))}
+                onClick={() => setZoom((z) => Math.max(z - 0.1, 0.3))}
               >
                 <ZoomOut className="w-4 h-4" />
               </Button>
@@ -384,7 +378,7 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8"
-                onClick={() => setOffsetY(y => y - 0.3)}
+                onClick={() => setOffsetY((y) => y - 0.3)}
               >
                 <ArrowUp className="w-4 h-4" />
               </Button>
@@ -392,17 +386,12 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8"
-                onClick={() => setOffsetY(y => y + 0.3)}
+                onClick={() => setOffsetY((y) => y + 0.3)}
               >
                 <ArrowDown className="w-4 h-4" />
               </Button>
               <div className="w-px h-6 bg-border mx-1" />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={handleReset}
-              >
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleReset}>
                 <RotateCcw className="w-4 h-4" />
               </Button>
             </div>
@@ -412,43 +401,5 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({
     </div>
   );
 };
-
-// Helper: Draw a textured triangle using affine transformation
-function drawTexturedTriangle(
-  ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
-  sx0: number, sy0: number,
-  sx1: number, sy1: number,
-  sx2: number, sy2: number,
-  dx0: number, dy0: number,
-  dx1: number, dy1: number,
-  dx2: number, dy2: number
-) {
-  ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(dx0, dy0);
-  ctx.lineTo(dx1, dy1);
-  ctx.lineTo(dx2, dy2);
-  ctx.closePath();
-  ctx.clip();
-
-  // Calculate affine transformation matrix
-  const denom = (sx0 - sx2) * (sy1 - sy2) - (sx1 - sx2) * (sy0 - sy2);
-  if (Math.abs(denom) < 0.001) {
-    ctx.restore();
-    return;
-  }
-
-  const m11 = ((dx0 - dx2) * (sy1 - sy2) - (dx1 - dx2) * (sy0 - sy2)) / denom;
-  const m12 = ((dx1 - dx2) * (sx0 - sx2) - (dx0 - dx2) * (sx1 - sx2)) / denom;
-  const m21 = ((dy0 - dy2) * (sy1 - sy2) - (dy1 - dy2) * (sy0 - sy2)) / denom;
-  const m22 = ((dy1 - dy2) * (sx0 - sx2) - (dy0 - dy2) * (sx1 - sx2)) / denom;
-  const m31 = dx2 - m11 * sx2 - m12 * sy2;
-  const m32 = dy2 - m21 * sx2 - m22 * sy2;
-
-  ctx.transform(m11, m21, m12, m22, m31, m32);
-  ctx.drawImage(img, 0, 0);
-  ctx.restore();
-}
 
 export default Live2DAvatar;
