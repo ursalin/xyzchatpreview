@@ -1,8 +1,7 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { Upload, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import idleVideo from '@/assets/character-idle.mp4';
-import sideVideo from '@/assets/character-side.mp4';
 
 interface VideoAvatarProps {
   isSpeaking?: boolean;
@@ -13,87 +12,51 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
   isSpeaking = false,
   onImageLoaded 
 }) => {
-  const videoARef = useRef<HTMLVideoElement>(null);
-  const videoBRef = useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
-  const [activeVideo, setActiveVideo] = useState<'A' | 'B'>('A');
-  const [videoSources] = useState([idleVideo, sideVideo]);
   const [customVideo, setCustomVideo] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
-  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [opacity, setOpacity] = useState(1);
 
-  // Handle video transition with fade
-  const handleVideoTimeUpdate = useCallback((video: HTMLVideoElement, isActiveVideo: boolean) => {
-    if (!isActiveVideo || isTransitioning || customVideo) return;
-    
-    const timeRemaining = video.duration - video.currentTime;
-    
-    // Start transition 0.8s before video ends
-    if (timeRemaining <= 0.8 && timeRemaining > 0) {
-      setIsTransitioning(true);
-      
-      // Switch to other video
-      setActiveVideo(prev => prev === 'A' ? 'B' : 'A');
-      
-      // Reset transition flag after animation completes
-      setTimeout(() => {
-        setIsTransitioning(false);
-      }, 800);
-    }
-  }, [isTransitioning, customVideo]);
-
-  // Set up video sources
+  // Handle seamless loop with fade transition
   useEffect(() => {
-    if (customVideo) {
-      if (videoARef.current) videoARef.current.src = customVideo;
-      if (videoBRef.current) videoBRef.current.src = customVideo;
-    } else {
-      if (videoARef.current) videoARef.current.src = videoSources[0];
-      if (videoBRef.current) videoBRef.current.src = videoSources[1];
-    }
-  }, [customVideo, videoSources]);
+    const video = videoRef.current;
+    if (!video) return;
 
-  // Handle time updates for seamless looping
-  useEffect(() => {
-    const videoA = videoARef.current;
-    const videoB = videoBRef.current;
-    
-    const handleTimeUpdateA = () => handleVideoTimeUpdate(videoA!, activeVideo === 'A');
-    const handleTimeUpdateB = () => handleVideoTimeUpdate(videoB!, activeVideo === 'B');
-    
-    if (videoA) videoA.addEventListener('timeupdate', handleTimeUpdateA);
-    if (videoB) videoB.addEventListener('timeupdate', handleTimeUpdateB);
+    const handleTimeUpdate = () => {
+      const timeRemaining = video.duration - video.currentTime;
+      
+      // Start fade out 0.5s before video ends
+      if (timeRemaining <= 0.5 && timeRemaining > 0) {
+        setOpacity(timeRemaining / 0.5);
+      } else if (video.currentTime < 0.5) {
+        // Fade in at the start
+        setOpacity(Math.min(1, 0.5 + video.currentTime));
+      } else {
+        setOpacity(1);
+      }
+    };
+
+    const handleEnded = () => {
+      video.currentTime = 0;
+      video.play().catch(() => {});
+    };
+
+    video.addEventListener('timeupdate', handleTimeUpdate);
+    video.addEventListener('ended', handleEnded);
     
     return () => {
-      if (videoA) videoA.removeEventListener('timeupdate', handleTimeUpdateA);
-      if (videoB) videoB.removeEventListener('timeupdate', handleTimeUpdateB);
+      video.removeEventListener('timeupdate', handleTimeUpdate);
+      video.removeEventListener('ended', handleEnded);
     };
-  }, [activeVideo, handleVideoTimeUpdate]);
-
-  // Control playback based on active video
-  useEffect(() => {
-    const videoA = videoARef.current;
-    const videoB = videoBRef.current;
-    
-    if (activeVideo === 'A') {
-      videoA?.play().catch(() => {});
-      if (videoB && !customVideo) {
-        videoB.currentTime = 0;
-      }
-    } else {
-      videoB?.play().catch(() => {});
-      if (videoA && !customVideo) {
-        videoA.currentTime = 0;
-      }
-    }
-  }, [activeVideo, customVideo]);
+  }, []);
 
   // Adjust playback rate based on speaking state
   useEffect(() => {
-    const rate = isSpeaking ? 1.15 : 1.0;
-    if (videoARef.current) videoARef.current.playbackRate = rate;
-    if (videoBRef.current) videoBRef.current.playbackRate = rate;
+    if (videoRef.current) {
+      videoRef.current.playbackRate = isSpeaking ? 1.15 : 1.0;
+    }
   }, [isSpeaking]);
 
   const handleVideoLoad = () => {
@@ -107,7 +70,6 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       const url = URL.createObjectURL(file);
       setCustomVideo(url);
       setIsLoaded(false);
-      setActiveVideo('A');
     }
   };
 
@@ -117,7 +79,6 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
     }
     setCustomVideo(null);
     setIsLoaded(false);
-    setActiveVideo('A');
   };
 
   return (
@@ -130,39 +91,22 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         className="hidden"
       />
       
-      {/* Video A (Front view / Custom) */}
+      {/* Main Video */}
       <video
-        ref={videoARef}
-        src={customVideo || videoSources[0]}
+        ref={videoRef}
+        src={customVideo || idleVideo}
         autoPlay
-        loop={!!customVideo}
+        loop
         muted
         playsInline
         onLoadedData={handleVideoLoad}
-        className="absolute inset-0 w-full h-full object-contain transition-opacity duration-700 ease-in-out"
+        className="absolute inset-0 w-full h-full object-contain"
         style={{
-          opacity: activeVideo === 'A' ? 1 : 0,
+          opacity: opacity,
           filter: isSpeaking ? 'brightness(1.05)' : 'brightness(1)',
-          transition: 'opacity 0.7s ease-in-out, filter 0.3s ease'
+          transition: 'filter 0.3s ease'
         }}
       />
-      
-      {/* Video B (Side view) - only used when no custom video */}
-      {!customVideo && (
-        <video
-          ref={videoBRef}
-          src={videoSources[1]}
-          autoPlay
-          muted
-          playsInline
-          className="absolute inset-0 w-full h-full object-contain transition-opacity duration-700 ease-in-out"
-          style={{
-            opacity: activeVideo === 'B' ? 1 : 0,
-            filter: isSpeaking ? 'brightness(1.05)' : 'brightness(1)',
-            transition: 'opacity 0.7s ease-in-out, filter 0.3s ease'
-          }}
-        />
-      )}
 
       {/* Loading spinner */}
       {!isLoaded && (
