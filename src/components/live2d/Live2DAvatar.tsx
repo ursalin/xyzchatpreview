@@ -210,7 +210,7 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImage
       ctx.globalCompositeOperation = "source-over";
       ctx.fillStyle = hsla(fg, 0.55);
 
-      const drawEye = (eye: (typeof DEFAULT_FEATURES)["eyeL"]) => {
+      const drawEye = (eye: { x: number; y: number; w: number; h: number }) => {
         const ex = metrics.baseX + eye.x * metrics.drawW;
         const ey = metrics.baseY + eye.y * metrics.drawH + breathY;
         const ew = eye.w * metrics.drawW;
