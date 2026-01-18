@@ -1,7 +1,8 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Upload, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import idleVideo from '@/assets/character-idle.mp4';
+import idleVideo from '@/assets/reference-motion.mp4';
+import posterImg from '@/assets/character-front.jpg';
 
 interface VideoAvatarProps {
   isSpeaking?: boolean;
@@ -12,52 +13,127 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
   isSpeaking = false,
   onImageLoaded 
 }) => {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoARef = useRef<HTMLVideoElement>(null);
+  const videoBRef = useRef<HTMLVideoElement>(null);
+  const isTransitioningRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
   const [customVideo, setCustomVideo] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
-  const [opacity, setOpacity] = useState(1);
+  const [active, setActive] = useState<'A' | 'B'>('A');
+  const [aOpacity, setAOpacity] = useState(1);
+  const [bOpacity, setBOpacity] = useState(0);
 
-  // Handle seamless loop with fade transition
+  const src = customVideo || idleVideo;
+  const CROSSFADE_SECONDS = 0.35;
+
+  // Seamless loop via double-buffer crossfade (prevents white/black frame at loop boundary)
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
+    const a = videoARef.current;
+    const b = videoBRef.current;
+    if (!a || !b) return;
 
-    const handleTimeUpdate = () => {
-      const timeRemaining = video.duration - video.currentTime;
-      
-      // Start fade out 0.5s before video ends
-      if (timeRemaining <= 0.5 && timeRemaining > 0) {
-        setOpacity(timeRemaining / 0.5);
-      } else if (video.currentTime < 0.5) {
-        // Fade in at the start
-        setOpacity(Math.min(1, 0.5 + video.currentTime));
-      } else {
-        setOpacity(1);
+    isTransitioningRef.current = false;
+    setActive('A');
+    setAOpacity(1);
+    setBOpacity(0);
+    setIsLoaded(false);
+
+    const prime = (v: HTMLVideoElement) => {
+      try {
+        v.pause();
+        v.currentTime = 0;
+        v.load();
+      } catch {
+        // ignore
       }
     };
 
-    const handleEnded = () => {
-      video.currentTime = 0;
-      video.play().catch(() => {});
+    prime(a);
+    prime(b);
+
+    const onCanPlay = () => {
+      void a.play().catch(() => {});
     };
 
-    video.addEventListener('timeupdate', handleTimeUpdate);
-    video.addEventListener('ended', handleEnded);
-    
-    return () => {
-      video.removeEventListener('timeupdate', handleTimeUpdate);
-      video.removeEventListener('ended', handleEnded);
+    a.addEventListener('canplay', onCanPlay, { once: true });
+    return () => a.removeEventListener('canplay', onCanPlay);
+  }, [src]);
+
+  useEffect(() => {
+    const a = videoARef.current;
+    const b = videoBRef.current;
+    if (!a || !b) return;
+
+    const activeEl = active === 'A' ? a : b;
+    const nextEl = active === 'A' ? b : a;
+
+    const onTimeUpdate = () => {
+      if (isTransitioningRef.current) return;
+
+      const d = activeEl.duration;
+      if (!Number.isFinite(d) || d <= 0) return;
+
+      const remaining = d - activeEl.currentTime;
+      if (remaining <= CROSSFADE_SECONDS && remaining > 0) {
+        isTransitioningRef.current = true;
+
+        try {
+          nextEl.currentTime = 0;
+        } catch {
+          // ignore
+        }
+
+        nextEl.playbackRate = activeEl.playbackRate;
+        void nextEl.play().catch(() => {});
+
+        // kick crossfade on next frame to ensure nextEl has begun rendering
+        requestAnimationFrame(() => {
+          if (active === 'A') {
+            setAOpacity(0);
+            setBOpacity(1);
+          } else {
+            setAOpacity(1);
+            setBOpacity(0);
+          }
+        });
+
+        window.setTimeout(() => {
+          activeEl.pause();
+          try {
+            activeEl.currentTime = 0;
+          } catch {
+            // ignore
+          }
+
+          const next = active === 'A' ? 'B' : 'A';
+          setActive(next);
+
+          // ensure stable final state
+          if (next === 'A') {
+            setAOpacity(1);
+            setBOpacity(0);
+          } else {
+            setAOpacity(0);
+            setBOpacity(1);
+          }
+
+          isTransitioningRef.current = false;
+        }, CROSSFADE_SECONDS * 1000);
+      }
     };
-  }, []);
+
+    activeEl.addEventListener('timeupdate', onTimeUpdate);
+    return () => activeEl.removeEventListener('timeupdate', onTimeUpdate);
+  }, [active, src]);
 
   // Adjust playback rate based on speaking state
   useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.playbackRate = isSpeaking ? 1.15 : 1.0;
-    }
+    const rate = isSpeaking ? 1.15 : 1.0;
+    if (videoARef.current) videoARef.current.playbackRate = rate;
+    if (videoBRef.current) videoBRef.current.playbackRate = rate;
   }, [isSpeaking]);
+
 
   const handleVideoLoad = () => {
     setIsLoaded(true);
@@ -91,20 +167,37 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         className="hidden"
       />
       
-      {/* Main Video */}
+      {/* Double-buffer Videos (crossfade loop) */}
       <video
-        ref={videoRef}
-        src={customVideo || idleVideo}
+        ref={videoARef}
+        src={src}
         autoPlay
-        loop
         muted
         playsInline
+        preload="auto"
+        poster={posterImg}
         onLoadedData={handleVideoLoad}
         className="absolute inset-0 w-full h-full object-contain"
         style={{
-          opacity: opacity,
+          opacity: aOpacity,
           filter: isSpeaking ? 'brightness(1.05)' : 'brightness(1)',
-          transition: 'filter 0.3s ease'
+          transition: `opacity ${Math.round(CROSSFADE_SECONDS * 1000)}ms linear, filter 0.3s ease`,
+        }}
+      />
+      <video
+        ref={videoBRef}
+        src={src}
+        autoPlay
+        muted
+        playsInline
+        preload="auto"
+        poster={posterImg}
+        onLoadedData={handleVideoLoad}
+        className="absolute inset-0 w-full h-full object-contain"
+        style={{
+          opacity: bOpacity,
+          filter: isSpeaking ? 'brightness(1.05)' : 'brightness(1)',
+          transition: `opacity ${Math.round(CROSSFADE_SECONDS * 1000)}ms linear, filter 0.3s ease`,
         }}
       />
 
