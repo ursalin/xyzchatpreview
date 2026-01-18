@@ -196,6 +196,7 @@ interface Avatar3DProps {
 export function Avatar3D({ isSpeaking, mood = 'neutral', className = '', modelUrl }: Avatar3DProps) {
   // 为了避免大模型导致浏览器/显卡崩溃：默认不自动加载外部GLB，必须手动确认。
   const [enableExternalModel, setEnableExternalModel] = useState(false);
+  const [forceExternalModel, setForceExternalModel] = useState(false);
   const [modelLoaded, setModelLoaded] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [progress, setProgress] = useState(0);
@@ -205,12 +206,16 @@ export function Avatar3D({ isSpeaking, mood = 'neutral', className = '', modelUr
   const deviceMemory = typeof navigator !== 'undefined' ? (navigator as any).deviceMemory : undefined;
   const isLowMemoryDevice = typeof deviceMemory === 'number' && deviceMemory > 0 && deviceMemory < 4;
 
-  const canOfferExternalModel = Boolean(modelUrl) && !isLowMemoryDevice;
-  const shouldRenderExternalModel = Boolean(modelUrl) && enableExternalModel && !isLowMemoryDevice;
+  // 低内存设备：默认不允许，但给“仍然加载”的强制入口（用户自担风险）
+  const allowExternalModel = !isLowMemoryDevice || forceExternalModel;
+
+  const canOfferExternalModel = Boolean(modelUrl);
+  const shouldRenderExternalModel = Boolean(modelUrl) && enableExternalModel && allowExternalModel;
 
   useEffect(() => {
     // modelUrl变化时：重置外部加载状态，避免自动再次触发大文件解析
     setEnableExternalModel(false);
+    setForceExternalModel(false);
     setModelLoaded(false);
     setLoadAttempt(0);
     setProgress(0);
@@ -244,25 +249,35 @@ export function Avatar3D({ isSpeaking, mood = 'neutral', className = '', modelUr
             </p>
             {isLowMemoryDevice && (
               <p className="mt-2 text-xs text-destructive">
-                当前设备内存较小（deviceMemory&lt;4GB），已自动禁用外部模型加载。
+                当前设备内存较小（deviceMemory&lt;4GB），可能加载失败或闪退；如需测试，可点“仍然加载”。
               </p>
             )}
             <div className="mt-4 flex gap-2 justify-center">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setEnableExternalModel(false)}
-              >
+              <Button variant="secondary" size="sm" onClick={() => setEnableExternalModel(false)}>
                 继续用默认头像
               </Button>
-              <Button
-                variant="default"
-                size="sm"
-                disabled={!canOfferExternalModel}
-                onClick={() => setEnableExternalModel(true)}
-              >
-                手动加载3D
-              </Button>
+              {isLowMemoryDevice ? (
+                <Button
+                  variant="default"
+                  size="sm"
+                  disabled={!canOfferExternalModel}
+                  onClick={() => {
+                    setForceExternalModel(true);
+                    setEnableExternalModel(true);
+                  }}
+                >
+                  仍然加载
+                </Button>
+              ) : (
+                <Button
+                  variant="default"
+                  size="sm"
+                  disabled={!canOfferExternalModel}
+                  onClick={() => setEnableExternalModel(true)}
+                >
+                  手动加载3D
+                </Button>
+              )}
             </div>
           </div>
         </div>
