@@ -1,72 +1,28 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Upload, X, ZoomIn, ZoomOut, ArrowUp, ArrowDown, RotateCcw } from "lucide-react";
+import characterAvatar from "@/assets/character-avatar.jpg";
 
 interface Live2DAvatarProps {
   isSpeaking?: boolean;
   onImageLoaded?: () => void;
 }
 
-type Hsl = { h: number; s: number; l: number };
-
-type AvatarMetrics = {
-  canvasW: number;
-  canvasH: number;
-  scale: number;
-  drawW: number;
-  drawH: number;
-  baseX: number; // top-left of image in canvas coords (before avatar transform)
-  baseY: number;
+// 针对这张角色图精确校准的五官位置 (归一化坐标 0-1)
+// 基于图片分析: 眼睛在约 14-16% 高度, 嘴巴在约 22% 高度
+const FEATURES = {
+  // 左眼 (从观众角度)
+  eyeL: { cx: 0.38, cy: 0.145, w: 0.08, h: 0.025 },
+  // 右眼
+  eyeR: { cx: 0.54, cy: 0.145, w: 0.08, h: 0.025 },
+  // 嘴巴
+  mouth: { cx: 0.465, cy: 0.215, w: 0.09, h: 0.025 },
+  // 胸部区域 (用于呼吸)
+  chest: { top: 0.30, bottom: 0.75 },
 };
 
-const DEFAULT_FEATURES = {
-  // These are normalized (0..1) relative to the image.
-  // They won't be perfect for every picture, but they won't deform the whole face.
-  eyeL: { x: 0.33, y: 0.215, w: 0.12, h: 0.05 },
-  eyeR: { x: 0.55, y: 0.215, w: 0.12, h: 0.05 },
-  mouth: { x: 0.43, y: 0.325, w: 0.14, h: 0.065 },
-} as const;
-
-function parseHslVar(raw: string): Hsl | null {
-  // expected formats like: "222.2 47.4% 11.2%" (Tailwind/Shadcn HSL variables)
-  const cleaned = raw.trim().replace(/,/g, " ");
-  const parts = cleaned.split(/\s+/).filter(Boolean);
-  if (parts.length < 3) return null;
-  const h = Number(parts[0]);
-  const s = Number(parts[1].replace("%", ""));
-  const l = Number(parts[2].replace("%", ""));
-  if ([h, s, l].some((n) => Number.isNaN(n))) return null;
-  return { h, s, l };
-}
-
-function hsla(hsl: Hsl, a: number) {
-  return `hsla(${hsl.h}, ${hsl.s}%, ${hsl.l}%, ${a})`;
-}
-
-function roundedRectPath(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number
-) {
-  const radius = Math.max(0, Math.min(r, Math.min(w, h) / 2));
-  ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.lineTo(x + w - radius, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
-  ctx.lineTo(x + w, y + h - radius);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
-  ctx.lineTo(x + radius, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
-  ctx.lineTo(x, y + radius);
-  ctx.quadraticCurveTo(x, y, x + radius, y);
-  ctx.closePath();
-}
-
 const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImageLoaded }) => {
-  const [imageSrc, setImageSrc] = useState<string | null>(null);
+  const [imageSrc, setImageSrc] = useState<string | null>(characterAvatar);
   const [isLoaded, setIsLoaded] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [offsetY, setOffsetY] = useState(0);
@@ -76,209 +32,232 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImage
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const rafRef = useRef<number | null>(null);
+  const rafRef = useRef<number>(0);
   const speakingRef = useRef(isSpeaking);
+  const skinColorRef = useRef<string>("rgb(220, 190, 170)");
 
-  // Blink scheduler
-  const blinkRef = useRef({
-    nextAt: 0,
-    active: false,
-    startAt: 0,
-  });
-
-  // Theme colors for canvas overlays
-  const colorsRef = useRef<{ foreground: Hsl; primary: Hsl } | null>(null);
+  // Blink state
+  const blinkRef = useRef({ nextAt: 0, phase: 0 });
 
   useEffect(() => {
     speakingRef.current = isSpeaking;
   }, [isSpeaking]);
 
-  useEffect(() => {
-    const root = document.documentElement;
-    const st = getComputedStyle(root);
-    const fg = parseHslVar(st.getPropertyValue("--foreground")) ?? { h: 0, s: 0, l: 0 };
-    const pr = parseHslVar(st.getPropertyValue("--primary")) ?? { h: 220, s: 90, l: 55 };
-    colorsRef.current = { foreground: fg, primary: pr };
+  // 从图片采样皮肤颜色
+  const sampleSkinColor = useCallback((img: HTMLImageElement) => {
+    const tempCanvas = document.createElement("canvas");
+    const size = 20;
+    tempCanvas.width = size;
+    tempCanvas.height = size;
+    const ctx = tempCanvas.getContext("2d");
+    if (!ctx) return;
+
+    // 采样眼睛上方额头区域
+    const sx = img.naturalWidth * 0.45;
+    const sy = img.naturalHeight * 0.10;
+    const sw = img.naturalWidth * 0.1;
+    const sh = img.naturalHeight * 0.03;
+
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, size, size);
+    const data = ctx.getImageData(0, 0, size, size).data;
+
+    let r = 0, g = 0, b = 0, count = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      r += data[i];
+      g += data[i + 1];
+      b += data[i + 2];
+      count++;
+    }
+    r = Math.round(r / count);
+    g = Math.round(g / count);
+    b = Math.round(b / count);
+    skinColorRef.current = `rgb(${r}, ${g}, ${b})`;
   }, []);
 
-  const computeMetrics = useMemo(() => {
-    return () => {
-      const canvas = canvasRef.current;
-      const img = imageRef.current;
-      const container = containerRef.current;
-      if (!canvas || !img || !container) return null;
+  // 加载默认图片
+  useEffect(() => {
+    if (imageSrc && !isLoaded) {
+      const img = new Image();
+      img.onload = () => {
+        imageRef.current = img;
+        sampleSkinColor(img);
+        setIsLoaded(true);
+        setShowControls(true);
+        onImageLoaded?.();
+      };
+      img.src = imageSrc;
+    }
+  }, [imageSrc, isLoaded, sampleSkinColor, onImageLoaded]);
 
-      const canvasW = container.clientWidth;
-      const canvasH = container.clientHeight;
-
-      const imgW = img.naturalWidth;
-      const imgH = img.naturalHeight;
-
-      const scale =
-        Math.min(canvasW / imgW, (canvasH * 0.86) / imgH) * Math.max(0.1, Math.min(zoom, 2));
-
-      const drawW = imgW * scale;
-      const drawH = imgH * scale;
-
-      const baseX = (canvasW - drawW) / 2;
-      const baseY = (canvasH - drawH) / 2 + offsetY * 50;
-
-      return { canvasW, canvasH, scale, drawW, drawH, baseX, baseY } satisfies AvatarMetrics;
-    };
-  }, [zoom, offsetY]);
-
-  const renderFrame = (t: number) => {
+  // 主渲染循环
+  const render = useCallback((time: number) => {
     const canvas = canvasRef.current;
     const img = imageRef.current;
-    if (!canvas || !img) return;
+    const container = containerRef.current;
+    if (!canvas || !img || !container) {
+      rafRef.current = requestAnimationFrame(render);
+      return;
+    }
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const metrics = computeMetrics();
-    if (!metrics) return;
+    const cw = container.clientWidth;
+    const ch = container.clientHeight;
+    if (canvas.width !== cw) canvas.width = cw;
+    if (canvas.height !== ch) canvas.height = ch;
 
-    // Keep canvas in sync
-    if (canvas.width !== metrics.canvasW) canvas.width = metrics.canvasW;
-    if (canvas.height !== metrics.canvasH) canvas.height = metrics.canvasH;
+    const imgW = img.naturalWidth;
+    const imgH = img.naturalHeight;
+    const baseScale = Math.min(cw / imgW, (ch * 0.9) / imgH);
+    const scale = baseScale * zoom;
+    const drawW = imgW * scale;
+    const drawH = imgH * scale;
+    const baseX = (cw - drawW) / 2;
+    const baseY = (ch - drawH) / 2 + offsetY * 50;
 
-    const elapsed = t / 1000;
-
-    // === Animation values (small, natural) ===
-    const breath = (Math.sin(elapsed * 1.6) + 1) / 2; // 0..1
-    const breathY = (breath - 0.5) * 6; // px
-    const breathScale = 1 + (breath - 0.5) * 0.012;
-
-    const headSway = Math.sin(elapsed * 0.55) * (speakingRef.current ? 1.0 : 0.6);
-    const headTiltRad = (headSway * Math.PI) / 180; // degrees -> rad (tiny)
-
-    // Blink state
+    const elapsed = time / 1000;
     const now = performance.now();
-    if (blinkRef.current.nextAt === 0) {
-      blinkRef.current.nextAt = now + 1800 + Math.random() * 2600;
+
+    // === 呼吸动画 (只影响胸部以下) ===
+    const breathCycle = (Math.sin(elapsed * 1.5) + 1) / 2; // 0-1
+    const breathExpand = breathCycle * 0.008; // 非常微小的缩放
+
+    // === 眨眼 ===
+    if (blinkRef.current.nextAt === 0 || now > blinkRef.current.nextAt + 180) {
+      blinkRef.current.nextAt = now + 2000 + Math.random() * 4000;
+      blinkRef.current.phase = 0;
+    }
+    const blinkElapsed = now - blinkRef.current.nextAt + 2000;
+    let blinkAmount = 0;
+    if (blinkElapsed > 0 && blinkElapsed < 180) {
+      blinkAmount = Math.sin((blinkElapsed / 180) * Math.PI);
     }
 
-    const blinkDuration = 140;
-    let blinkAmount = 0; // 0..1
-    if (!blinkRef.current.active && now >= blinkRef.current.nextAt) {
-      blinkRef.current.active = true;
-      blinkRef.current.startAt = now;
-    }
-    if (blinkRef.current.active) {
-      const p = (now - blinkRef.current.startAt) / blinkDuration;
-      if (p >= 1) {
-        blinkRef.current.active = false;
-        blinkRef.current.nextAt = now + 2000 + Math.random() * 3500;
-      } else {
-        // ease in/out blink
-        blinkAmount = Math.sin(Math.min(1, Math.max(0, p)) * Math.PI);
-      }
-    }
-
-    // Mouth talking amount
+    // === 嘴巴说话 ===
     let mouthOpen = 0;
     if (speakingRef.current) {
-      mouthOpen =
-        (Math.sin(elapsed * 10.5) + 1) / 2 * 0.6 + (Math.sin(elapsed * 6.2) + 1) / 2 * 0.4;
-      mouthOpen = Math.min(1, Math.max(0, mouthOpen));
+      mouthOpen = (Math.sin(elapsed * 11) + 1) / 2 * 0.7 +
+                  (Math.sin(elapsed * 7.3) + 1) / 2 * 0.3;
     }
 
-    // === Draw ===
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // === 轻微摇头 ===
+    const headSway = Math.sin(elapsed * 0.6) * 0.3 +
+                     (speakingRef.current ? Math.sin(elapsed * 2.8) * 0.25 : 0);
 
-    // Transform around the image bottom-center (feels more "body")
-    const originX = metrics.baseX + metrics.drawW / 2;
-    const originY = metrics.baseY + metrics.drawH * 0.95;
+    ctx.clearRect(0, 0, cw, ch);
 
+    // ======= 分层绘制 =======
+
+    // 1. 绘制头部区域 (不变形, 只有轻微摇晃)
+    const headBottom = baseY + drawH * FEATURES.chest.top;
+    
     ctx.save();
-    ctx.translate(originX, originY);
-    ctx.rotate(headTiltRad * 0.18); // very subtle
-    ctx.scale(breathScale, breathScale);
-    ctx.translate(-originX, -originY);
+    // 头部以脖子为轴心轻微转动
+    const headPivotX = baseX + drawW / 2;
+    const headPivotY = headBottom;
+    ctx.translate(headPivotX, headPivotY);
+    ctx.rotate((headSway * Math.PI) / 180 * 0.3);
+    ctx.translate(-headPivotX, -headPivotY);
 
-    // Draw the base image (NO WARP) with slight breathing vertical motion
-    ctx.drawImage(img, metrics.baseX, metrics.baseY + breathY, metrics.drawW, metrics.drawH);
+    // 只绘制头部
+    ctx.drawImage(
+      img,
+      0, 0, imgW, imgH * FEATURES.chest.top, // 源: 头部
+      baseX, baseY, drawW, drawH * FEATURES.chest.top // 目标
+    );
 
-    // === Overlays (no image deformation) ===
-    const colors = colorsRef.current;
-    const fg = colors?.foreground ?? { h: 0, s: 0, l: 0 };
-    const pr = colors?.primary ?? { h: 220, s: 90, l: 55 };
+    // 2. 绘制眨眼效果 (皮肤色眼睑)
+    if (blinkAmount > 0.02) {
+      ctx.fillStyle = skinColorRef.current;
 
-    // Blink eyelids (cover eyes briefly)
-    if (blinkAmount > 0.01) {
-      ctx.save();
-      ctx.globalCompositeOperation = "source-over";
-      ctx.fillStyle = hsla(fg, 0.55);
+      const drawEyelid = (eye: { cx: number; cy: number; w: number; h: number }) => {
+        const ex = baseX + eye.cx * drawW;
+        const ey = baseY + eye.cy * drawH;
+        const ew = eye.w * drawW;
+        const eh = eye.h * drawH * 2.5; // 眼睑高度
 
-      const drawEye = (eye: { x: number; y: number; w: number; h: number }) => {
-        const ex = metrics.baseX + eye.x * metrics.drawW;
-        const ey = metrics.baseY + eye.y * metrics.drawH + breathY;
-        const ew = eye.w * metrics.drawW;
-        const eh = eye.h * metrics.drawH;
-
-        // eyelid height grows with blinkAmount
-        const lidH = eh * blinkAmount;
-        const centerY = ey + eh / 2;
-        const yTop = centerY - lidH / 2;
-
-        roundedRectPath(ctx, ex, yTop, ew, lidH, ew * 0.18);
+        // 上眼睑从上往下闭合
+        const lidClosedH = eh * blinkAmount;
+        
+        ctx.beginPath();
+        ctx.ellipse(ex, ey - eh / 2 + lidClosedH / 2, ew / 2, lidClosedH / 2, 0, 0, Math.PI * 2);
         ctx.fill();
       };
 
-      drawEye(DEFAULT_FEATURES.eyeL);
-      drawEye(DEFAULT_FEATURES.eyeR);
-      ctx.restore();
+      drawEyelid(FEATURES.eyeL);
+      drawEyelid(FEATURES.eyeR);
     }
 
-    // Mouth talking: draw a small dark "opening" + subtle highlight
-    if (mouthOpen > 0.01) {
-      const m = DEFAULT_FEATURES.mouth;
-      const mx = metrics.baseX + m.x * metrics.drawW;
-      const my = metrics.baseY + m.y * metrics.drawH + breathY;
-      const mw = m.w * metrics.drawW;
-      const mh = m.h * metrics.drawH;
+    // 3. 绘制嘴巴动画 (阴影表示张嘴)
+    if (mouthOpen > 0.05) {
+      const m = FEATURES.mouth;
+      const mx = baseX + m.cx * drawW;
+      const my = baseY + m.cy * drawH;
+      const mw = m.w * drawW;
+      const mh = m.h * drawH;
 
-      const openH = mh * (0.25 + mouthOpen * 0.65);
-      const openY = my + mh * 0.35;
-
+      // 嘴巴张开的黑色内部
+      const openH = mh * (0.8 + mouthOpen * 2);
+      
       ctx.save();
       ctx.globalCompositeOperation = "multiply";
-      ctx.fillStyle = hsla(fg, 0.35);
-      roundedRectPath(ctx, mx + mw * 0.18, openY, mw * 0.64, openH, mw * 0.22);
+      ctx.fillStyle = `rgba(40, 20, 20, ${0.4 + mouthOpen * 0.3})`;
+      ctx.beginPath();
+      ctx.ellipse(mx, my + openH * 0.3, mw * 0.45, openH * 0.5, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      // tiny highlight (looks like lip sheen)
+      // 牙齿高光
       ctx.globalCompositeOperation = "screen";
-      ctx.fillStyle = hsla(pr, 0.12 + mouthOpen * 0.08);
-      roundedRectPath(ctx, mx + mw * 0.22, openY + openH * 0.15, mw * 0.56, openH * 0.18, mw * 0.2);
+      ctx.fillStyle = `rgba(255, 255, 255, ${mouthOpen * 0.25})`;
+      ctx.beginPath();
+      ctx.ellipse(mx, my, mw * 0.35, openH * 0.15, 0, Math.PI, Math.PI * 2);
       ctx.fill();
-      ctx.restore();
-    }
-
-    // Speaking glow (very subtle)
-    if (speakingRef.current) {
-      ctx.save();
-      ctx.globalCompositeOperation = "screen";
-      ctx.fillStyle = hsla(pr, 0.04);
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.restore();
     }
 
     ctx.restore();
 
-    rafRef.current = requestAnimationFrame(renderFrame);
-  };
+    // 4. 绘制身体区域 (带呼吸效果)
+    ctx.save();
+    const bodyTop = FEATURES.chest.top;
+    const bodyPivotX = baseX + drawW / 2;
+    const bodyPivotY = baseY + drawH * bodyTop;
+    
+    ctx.translate(bodyPivotX, bodyPivotY);
+    ctx.scale(1 + breathExpand, 1 + breathExpand * 0.5);
+    ctx.translate(-bodyPivotX, -bodyPivotY);
+
+    // 绘制身体
+    ctx.drawImage(
+      img,
+      0, imgH * bodyTop, imgW, imgH * (1 - bodyTop), // 源: 身体
+      baseX, baseY + drawH * bodyTop, drawW, drawH * (1 - bodyTop) // 目标
+    );
+    ctx.restore();
+
+    // 说话时的微光效果
+    if (speakingRef.current) {
+      const gradient = ctx.createRadialGradient(
+        baseX + drawW / 2, baseY + drawH * 0.2, 0,
+        baseX + drawW / 2, baseY + drawH * 0.2, drawW * 0.5
+      );
+      gradient.addColorStop(0, `rgba(100, 150, 255, ${0.08 + mouthOpen * 0.05})`);
+      gradient.addColorStop(1, "transparent");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, cw, ch);
+    }
+
+    rafRef.current = requestAnimationFrame(render);
+  }, [zoom, offsetY]);
 
   useEffect(() => {
     if (!isLoaded) return;
-    rafRef.current = requestAnimationFrame(renderFrame);
+    rafRef.current = requestAnimationFrame(render);
     return () => {
-    
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoaded, computeMetrics]);
+  }, [isLoaded, render]);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -290,6 +269,7 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImage
       const img = new Image();
       img.onload = () => {
         imageRef.current = img;
+        sampleSkinColor(img);
         setImageSrc(url);
         setIsLoaded(true);
         setShowControls(true);
@@ -307,7 +287,6 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImage
     setZoom(1);
     setOffsetY(0);
     imageRef.current = null;
-    blinkRef.current = { nextAt: 0, active: false, startAt: 0 };
   };
 
   const handleReset = () => {
@@ -328,7 +307,7 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImage
           <p className="text-muted-foreground text-center text-sm">
             上传游戏角色图片
             <br />
-            <span className="text-xs opacity-70">建议：正面半身照（脸更居中效果更好）</span>
+            <span className="text-xs opacity-70">或使用默认角色</span>
           </p>
           <Button variant="outline" onClick={() => fileInputRef.current?.click()} className="gap-2">
             <Upload className="w-4 h-4" />
@@ -344,7 +323,7 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImage
         </div>
       ) : (
         <>
-          <canvas ref={canvasRef} className="w-full h-full" style={{ imageRendering: "auto" }} />
+          <canvas ref={canvasRef} className="w-full h-full" />
 
           <Button
             variant="ghost"
@@ -357,42 +336,26 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImage
 
           {showControls && (
             <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1 p-2 rounded-full bg-background/80 backdrop-blur-sm border border-border/50">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => setZoom((z) => Math.min(z + 0.1, 2))}
-              >
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setZoom(z => Math.min(z + 0.1, 2))}>
                 <ZoomIn className="w-4 h-4" />
               </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => setZoom((z) => Math.max(z - 0.1, 0.3))}
-              >
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setZoom(z => Math.max(z - 0.1, 0.3))}>
                 <ZoomOut className="w-4 h-4" />
               </Button>
               <div className="w-px h-6 bg-border mx-1" />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => setOffsetY((y) => y - 0.3)}
-              >
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setOffsetY(y => y - 0.3)}>
                 <ArrowUp className="w-4 h-4" />
               </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                onClick={() => setOffsetY((y) => y + 0.3)}
-              >
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setOffsetY(y => y + 0.3)}>
                 <ArrowDown className="w-4 h-4" />
               </Button>
               <div className="w-px h-6 bg-border mx-1" />
               <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleReset}>
                 <RotateCcw className="w-4 h-4" />
+              </Button>
+              <div className="w-px h-6 bg-border mx-1" />
+              <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => fileInputRef.current?.click()}>
+                换图
               </Button>
             </div>
           )}
