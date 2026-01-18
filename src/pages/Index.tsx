@@ -5,9 +5,9 @@ import { useSettings } from '@/hooks/useSettings';
 import { Button } from '@/components/ui/button';
 import { PanelLeftClose, PanelLeft } from 'lucide-react';
 
-// 3D角色模型URL - 暂时禁用大模型，使用默认头像避免崩溃
-// 41MB的模型文件太大，需要压缩后再使用
-const CHARACTER_MODEL_URL: string | null = null;
+// 3D角色模型URL - 使用GitHub托管的压缩版GLB模型
+const CHARACTER_MODEL_URL: string | null = 
+  "https://raw.githubusercontent.com/ursalin/3D-XYZ/main/XYZ%EF%BC%81%E5%8E%8B%E7%BC%A9%E5%88%9D%E7%89%88.glb";
 
 const Index = () => {
   const { settings } = useSettings();

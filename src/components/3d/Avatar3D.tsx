@@ -240,7 +240,7 @@ export function Avatar3D({ isSpeaking, mood = 'neutral', className = '', modelUr
           <div className="max-w-[320px] w-full rounded-2xl border border-border/50 bg-background/80 backdrop-blur-sm shadow-lg p-4 text-center">
             <p className="text-sm font-medium text-foreground">已检测到外部3D模型</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              为防止大文件导致闪退，默认使用内置头像。确认电脑性能/网络允许后再手动加载。
+              文件约 27MB，为防止大文件导致闪退，默认使用内置头像。确认电脑性能/网络允许后再手动加载。
             </p>
             {isLowMemoryDevice && (
               <p className="mt-2 text-xs text-destructive">
@@ -281,7 +281,7 @@ export function Avatar3D({ isSpeaking, mood = 'neutral', className = '', modelUr
 
       <ErrorBoundary>
         <Canvas
-          camera={{ position: [0, 0, 4], fov: 45 }}
+          camera={{ position: [0, 0.5, 3.5], fov: 50 }}
           dpr={[1, 1.5]}
           gl={{ antialias: true, powerPreference: 'high-performance' }}
           style={{ background: 'transparent' }}
