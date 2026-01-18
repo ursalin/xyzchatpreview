@@ -2,6 +2,7 @@ import { useRef, useEffect, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useGLTF, useAnimations } from '@react-three/drei';
 import * as THREE from 'three';
+import { SkeletonUtils } from 'three-stdlib';
 
 interface CharacterModelProps {
   url: string;
@@ -18,8 +19,8 @@ export function CharacterModel({ url, isSpeaking, mood = 'neutral', onLoaded }: 
   // Animation timer
   const speakTimer = useRef(0);
   
-  // Clone the scene to avoid sharing issues
-  const clonedScene = useMemo(() => scene.clone(), [scene]);
+  // ✅ 正确克隆带骨骼/蒙皮的模型（否则附件/头饰可能“分家”）
+  const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
 
   // 计算模型居中和缩放 - 不修改任何骨骼！
   const { scale, position } = useMemo(() => {
