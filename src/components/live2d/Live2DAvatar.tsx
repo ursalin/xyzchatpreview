@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Upload, X, ZoomIn, ZoomOut, ArrowUp, ArrowDown, RotateCcw } from "lucide-react";
+import { Upload, X, ZoomIn, ZoomOut, ArrowUp, ArrowDown, RotateCcw, Settings, Check } from "lucide-react";
 import characterAvatar from "@/assets/character-avatar.jpg";
 
 interface Live2DAvatarProps {
@@ -8,16 +8,25 @@ interface Live2DAvatarProps {
   onImageLoaded?: () => void;
 }
 
-// 针对这张角色图精确校准的五官位置 (归一化坐标 0-1)
-// 基于截图重新测量: 脸在图片约20-30%高度区域
-const FEATURES = {
-  // 左眼 (从观众角度看在右边) - 图片中约在 x:40%, y:23%
+interface FeatureRegion {
+  cx: number;
+  cy: number;
+  w: number;
+  h: number;
+}
+
+interface Features {
+  eyeL: FeatureRegion;
+  eyeR: FeatureRegion;
+  mouth: FeatureRegion;
+  chest: { top: number; bottom: number };
+}
+
+// 默认五官位置
+const DEFAULT_FEATURES: Features = {
   eyeL: { cx: 0.42, cy: 0.23, w: 0.055, h: 0.018 },
-  // 右眼 (从观众角度看在左边) - 图片中约在 x:56%, y:23%
   eyeR: { cx: 0.56, cy: 0.23, w: 0.055, h: 0.018 },
-  // 嘴巴 - 图片中约在 x:49%, y:32%
   mouth: { cx: 0.49, cy: 0.32, w: 0.06, h: 0.018 },
-  // 胸部区域 (用于呼吸) - 从脖子以下开始
   chest: { top: 0.40, bottom: 0.95 },
 };
 
@@ -27,6 +36,9 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImage
   const [zoom, setZoom] = useState(1);
   const [offsetY, setOffsetY] = useState(0);
   const [showControls, setShowControls] = useState(false);
+  const [calibrationMode, setCalibrationMode] = useState(false);
+  const [features, setFeatures] = useState<Features>(DEFAULT_FEATURES);
+  const [dragTarget, setDragTarget] = useState<{ type: 'eyeL' | 'eyeR' | 'mouth'; mode: 'move' | 'resize' } | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -35,6 +47,8 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImage
   const rafRef = useRef<number>(0);
   const speakingRef = useRef(isSpeaking);
   const skinColorRef = useRef<string>("rgb(220, 190, 170)");
+  const featuresRef = useRef(features);
+  const drawInfoRef = useRef({ baseX: 0, baseY: 0, drawW: 0, drawH: 0 });
 
   // Blink state
   const blinkRef = useRef({ nextAt: 0, phase: 0 });
@@ -42,6 +56,10 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImage
   useEffect(() => {
     speakingRef.current = isSpeaking;
   }, [isSpeaking]);
+
+  useEffect(() => {
+    featuresRef.current = features;
+  }, [features]);
 
   // 从图片采样皮肤颜色
   const sampleSkinColor = useCallback((img: HTMLImageElement) => {
@@ -116,6 +134,10 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImage
     const baseX = (cw - drawW) / 2;
     const baseY = (ch - drawH) / 2 + offsetY * 50;
 
+    // 保存绘制信息用于校准模式
+    drawInfoRef.current = { baseX, baseY, drawW, drawH };
+    const feat = featuresRef.current;
+
     const elapsed = time / 1000;
     const now = performance.now();
 
@@ -150,7 +172,7 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImage
     // ======= 分层绘制 =======
 
     // 1. 绘制头部区域 (不变形, 只有轻微摇晃)
-    const headBottom = baseY + drawH * FEATURES.chest.top;
+    const headBottom = baseY + drawH * feat.chest.top;
     
     ctx.save();
     // 头部以脖子为轴心轻微转动
@@ -163,8 +185,8 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImage
     // 只绘制头部
     ctx.drawImage(
       img,
-      0, 0, imgW, imgH * FEATURES.chest.top, // 源: 头部
-      baseX, baseY, drawW, drawH * FEATURES.chest.top // 目标
+      0, 0, imgW, imgH * feat.chest.top, // 源: 头部
+      baseX, baseY, drawW, drawH * feat.chest.top // 目标
     );
 
     // 2. 绘制眨眼效果 (皮肤色眼睑)
@@ -185,13 +207,13 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImage
         ctx.fill();
       };
 
-      drawEyelid(FEATURES.eyeL);
-      drawEyelid(FEATURES.eyeR);
+      drawEyelid(feat.eyeL);
+      drawEyelid(feat.eyeR);
     }
 
     // 3. 绘制嘴巴动画 (阴影表示张嘴)
     if (mouthOpen > 0.05) {
-      const m = FEATURES.mouth;
+      const m = feat.mouth;
       const mx = baseX + m.cx * drawW;
       const my = baseY + m.cy * drawH;
       const mw = m.w * drawW;
@@ -220,7 +242,7 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImage
 
     // 4. 绘制身体区域 (带呼吸效果)
     ctx.save();
-    const bodyTop = FEATURES.chest.top;
+    const bodyTop = feat.chest.top;
     const bodyPivotX = baseX + drawW / 2;
     const bodyPivotY = baseY + drawH * bodyTop;
     
@@ -294,10 +316,67 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImage
     setOffsetY(0);
   };
 
+  // 拖拽处理
+  const handleMouseDown = (type: 'eyeL' | 'eyeR' | 'mouth', mode: 'move' | 'resize') => (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragTarget({ type, mode });
+  };
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!dragTarget || !containerRef.current) return;
+    
+    const rect = containerRef.current.getBoundingClientRect();
+    const { baseX, baseY, drawW, drawH } = drawInfoRef.current;
+    
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    
+    // 转换为归一化坐标
+    const normX = (mouseX - baseX) / drawW;
+    const normY = (mouseY - baseY) / drawH;
+
+    setFeatures(prev => {
+      const updated = { ...prev };
+      const target = updated[dragTarget.type];
+      
+      if (dragTarget.mode === 'move') {
+        target.cx = Math.max(0, Math.min(1, normX));
+        target.cy = Math.max(0, Math.min(1, normY));
+      } else {
+        // resize - 根据鼠标距离中心调整大小
+        const dx = Math.abs(normX - target.cx);
+        const dy = Math.abs(normY - target.cy);
+        target.w = Math.max(0.02, Math.min(0.2, dx * 2));
+        target.h = Math.max(0.01, Math.min(0.1, dy * 2));
+      }
+      
+      return updated;
+    });
+  }, [dragTarget]);
+
+  const handleMouseUp = () => {
+    setDragTarget(null);
+  };
+
+  // 计算校准点的屏幕位置
+  const getScreenPos = (region: FeatureRegion) => {
+    const { baseX, baseY, drawW, drawH } = drawInfoRef.current;
+    return {
+      x: baseX + region.cx * drawW,
+      y: baseY + region.cy * drawH,
+      w: region.w * drawW,
+      h: region.h * drawH * 3,
+    };
+  };
+
   return (
     <div
       ref={containerRef}
       className="relative w-full h-full flex items-center justify-center overflow-hidden bg-gradient-to-b from-background/50 to-background"
+      onMouseMove={calibrationMode ? handleMouseMove : undefined}
+      onMouseUp={calibrationMode ? handleMouseUp : undefined}
+      onMouseLeave={calibrationMode ? handleMouseUp : undefined}
     >
       {!imageSrc ? (
         <div className="flex flex-col items-center gap-4 p-8">
@@ -324,6 +403,36 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImage
       ) : (
         <>
           <canvas ref={canvasRef} className="w-full h-full" />
+
+          {/* 校准模式覆盖层 */}
+          {calibrationMode && isLoaded && (
+            <div className="absolute inset-0 pointer-events-none">
+              {/* 左眼 */}
+              <CalibrationHandle
+                label="左眼"
+                color="hsl(var(--primary))"
+                pos={getScreenPos(features.eyeL)}
+                onMoveStart={handleMouseDown('eyeL', 'move')}
+                onResizeStart={handleMouseDown('eyeL', 'resize')}
+              />
+              {/* 右眼 */}
+              <CalibrationHandle
+                label="右眼"
+                color="hsl(var(--primary))"
+                pos={getScreenPos(features.eyeR)}
+                onMoveStart={handleMouseDown('eyeR', 'move')}
+                onResizeStart={handleMouseDown('eyeR', 'resize')}
+              />
+              {/* 嘴巴 */}
+              <CalibrationHandle
+                label="嘴巴"
+                color="hsl(var(--destructive))"
+                pos={getScreenPos(features.mouth)}
+                onMoveStart={handleMouseDown('mouth', 'move')}
+                onResizeStart={handleMouseDown('mouth', 'resize')}
+              />
+            </div>
+          )}
 
           <Button
             variant="ghost"
@@ -354,14 +463,99 @@ const Live2DAvatar: React.FC<Live2DAvatarProps> = ({ isSpeaking = false, onImage
                 <RotateCcw className="w-4 h-4" />
               </Button>
               <div className="w-px h-6 bg-border mx-1" />
+              <Button 
+                variant={calibrationMode ? "default" : "ghost"} 
+                size="icon" 
+                className="h-8 w-8" 
+                onClick={() => setCalibrationMode(!calibrationMode)}
+              >
+                {calibrationMode ? <Check className="w-4 h-4" /> : <Settings className="w-4 h-4" />}
+              </Button>
+              <div className="w-px h-6 bg-border mx-1" />
               <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => fileInputRef.current?.click()}>
                 换图
+              </Button>
+            </div>
+          )}
+
+          {calibrationMode && (
+            <div className="absolute top-2 left-2 bg-background/90 backdrop-blur-sm rounded-lg p-3 text-xs border border-border/50">
+              <p className="font-medium mb-1">校准模式</p>
+              <p className="text-muted-foreground">拖拽中心点移动位置</p>
+              <p className="text-muted-foreground">拖拽边角调整大小</p>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="mt-2 w-full text-xs h-7"
+                onClick={() => setFeatures(DEFAULT_FEATURES)}
+              >
+                重置默认
               </Button>
             </div>
           )}
         </>
       )}
     </div>
+  );
+};
+
+// 校准手柄组件
+interface CalibrationHandleProps {
+  label: string;
+  color: string;
+  pos: { x: number; y: number; w: number; h: number };
+  onMoveStart: (e: React.MouseEvent) => void;
+  onResizeStart: (e: React.MouseEvent) => void;
+}
+
+const CalibrationHandle: React.FC<CalibrationHandleProps> = ({ label, color, pos, onMoveStart, onResizeStart }) => {
+  return (
+    <>
+      {/* 区域框 */}
+      <div
+        className="absolute border-2 rounded-sm pointer-events-none"
+        style={{
+          left: pos.x - pos.w / 2,
+          top: pos.y - pos.h / 2,
+          width: pos.w,
+          height: pos.h,
+          borderColor: color,
+          backgroundColor: `${color}20`,
+        }}
+      />
+      {/* 标签 */}
+      <div
+        className="absolute text-[10px] font-medium px-1 rounded pointer-events-none"
+        style={{
+          left: pos.x - pos.w / 2,
+          top: pos.y - pos.h / 2 - 16,
+          color: color,
+          backgroundColor: 'hsl(var(--background) / 0.8)',
+        }}
+      >
+        {label}
+      </div>
+      {/* 中心拖拽点 */}
+      <div
+        className="absolute w-4 h-4 rounded-full cursor-move pointer-events-auto border-2 bg-background"
+        style={{
+          left: pos.x - 8,
+          top: pos.y - 8,
+          borderColor: color,
+        }}
+        onMouseDown={onMoveStart}
+      />
+      {/* 调整大小拖拽点 (右下角) */}
+      <div
+        className="absolute w-3 h-3 rounded-sm cursor-se-resize pointer-events-auto border-2 bg-background"
+        style={{
+          left: pos.x + pos.w / 2 - 6,
+          top: pos.y + pos.h / 2 - 6,
+          borderColor: color,
+        }}
+        onMouseDown={onResizeStart}
+      />
+    </>
   );
 };
 
