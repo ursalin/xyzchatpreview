@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Upload, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import idleVideo from '@/assets/reference-motion.mp4';
+import idleVideo from '@/assets/character-idle.mp4';
 import posterImg from '@/assets/character-front.jpg';
 
 interface VideoAvatarProps {
