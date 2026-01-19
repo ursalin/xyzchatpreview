@@ -14,14 +14,14 @@ interface VideoAvatarProps {
 }
 
 interface LoopConfig {
-  loopStartPercent: number;   // 循环起点百分比 (0-50)
-  loopEndPercent: number;     // 循环终点百分比 (50-100，实际 = 100 - value)
-  crossfadeMs: number;        // 交叉淡入淡出时长 (50-500ms)
+  loopStartPercent: number;
+  loopEndPercent: number;
+  crossfadeMs: number;
 }
 
 interface FrameAnalysis {
-  position: number;      // 帧位置百分比
-  diffScore: number;     // 与首帧差异分数 (0-100, 越小越相似)
+  position: number;
+  diffScore: number;
 }
 
 interface AnalysisResult {
@@ -29,7 +29,7 @@ interface AnalysisResult {
   bestEndPercent: number;
   startFrames: FrameAnalysis[];
   endFrames: FrameAnalysis[];
-  confidence: number;    // 推荐置信度 (0-100)
+  confidence: number;
 }
 
 const DEFAULT_CONFIG: LoopConfig = {
@@ -49,9 +49,6 @@ const calculateFrameDiff = (
   const dataA = frameA.data;
   const dataB = frameB.data;
   let totalDiff = 0;
-  const pixelCount = width * height;
-  
-  // 采样计算（每隔4个像素采样一次以提高性能）
   const step = 4;
   let samples = 0;
   
@@ -63,7 +60,6 @@ const calculateFrameDiff = (
     samples++;
   }
   
-  // 归一化到 0-100
   return (totalDiff / samples / 255) * 100;
 };
 
@@ -91,7 +87,7 @@ const captureFrame = (
   });
 };
 
-// 分析视频首尾帧差异（两阶段：粗扫描 + 密集精确扫描）
+// 两阶段分析：粗扫描 + 密集精确扫描
 const analyzeVideoFrames = async (
   videoSrc: string,
   onProgress: (percent: number) => void
@@ -118,19 +114,16 @@ const analyzeVideoFrames = async (
       canvas.width = width;
       canvas.height = height;
       
-      // === 第一阶段：粗扫描（找候选区域）===
       const coarseSampleCount = 10;
       const startFrames: FrameAnalysis[] = [];
       const endFrames: FrameAnalysis[] = [];
       
       try {
-        // 捕获参考帧
         onProgress(2);
         const firstFrame = await captureFrame(video, canvas, ctx, 0.1);
         onProgress(4);
         const lastFrame = await captureFrame(video, canvas, ctx, duration - 0.1);
         
-        // 粗扫描开头区域（0-30%）
         for (let i = 0; i <= coarseSampleCount; i++) {
           const percent = (i / coarseSampleCount) * 30;
           const time = (percent / 100) * duration;
@@ -140,7 +133,6 @@ const analyzeVideoFrames = async (
           onProgress(4 + (i / coarseSampleCount) * 18);
         }
         
-        // 粗扫描结尾区域（70-100%）
         for (let i = 0; i <= coarseSampleCount; i++) {
           const percent = 70 + (i / coarseSampleCount) * 30;
           const time = (percent / 100) * duration;
@@ -150,7 +142,6 @@ const analyzeVideoFrames = async (
           onProgress(22 + (i / coarseSampleCount) * 18);
         }
         
-        // 找粗扫描最佳候选
         const coarseBestStart = startFrames.reduce((best, curr) => 
           curr.diffScore < best.diffScore ? curr : best
         );
@@ -158,11 +149,9 @@ const analyzeVideoFrames = async (
           curr.diffScore < best.diffScore ? curr : best
         );
         
-        // === 第二阶段：密集精确扫描（±1%范围，0.05%步长）===
-        const fineStep = 0.05; // 0.05% 步长
-        const fineRange = 1.0; // ±1% 范围
+        const fineStep = 0.05;
+        const fineRange = 1.0;
         
-        // 密集扫描开头区域
         const fineStartFrames: FrameAnalysis[] = [];
         const fineStartMin = Math.max(0, coarseBestStart.position - fineRange);
         const fineStartMax = Math.min(30, coarseBestStart.position + fineRange);
@@ -178,9 +167,8 @@ const analyzeVideoFrames = async (
           onProgress(40 + (i / fineStartCount) * 25);
         }
         
-        // 密集扫描结尾区域
         const fineEndFrames: FrameAnalysis[] = [];
-        const actualEndPercent = 100 - coarseBestEnd.position; // 转回实际位置
+        const actualEndPercent = 100 - coarseBestEnd.position;
         const fineEndMin = Math.max(70, actualEndPercent - fineRange);
         const fineEndMax = Math.min(100, actualEndPercent + fineRange);
         const fineEndCount = Math.ceil((fineEndMax - fineEndMin) / fineStep);
@@ -195,7 +183,6 @@ const analyzeVideoFrames = async (
           onProgress(65 + (i / fineEndCount) * 30);
         }
         
-        // 合并精细结果到总列表
         fineStartFrames.forEach(f => {
           if (!startFrames.some(s => Math.abs(s.position - f.position) < 0.01)) {
             startFrames.push(f);
@@ -207,7 +194,6 @@ const analyzeVideoFrames = async (
           }
         });
         
-        // 从精细扫描中找最佳点（保留小数）
         const fineBestStart = fineStartFrames.reduce((best, curr) => 
           curr.diffScore < best.diffScore ? curr : best
         );
@@ -215,13 +201,11 @@ const analyzeVideoFrames = async (
           curr.diffScore < best.diffScore ? curr : best
         );
         
-        // 计算置信度
         const avgMinDiff = (fineBestStart.diffScore + fineBestEnd.diffScore) / 2;
         const confidence = Math.max(0, Math.min(100, 100 - avgMinDiff * 5));
         
         onProgress(100);
         
-        // 保留两位小数
         resolve({
           bestStartPercent: Math.round(fineBestStart.position * 100) / 100,
           bestEndPercent: Math.round(fineBestEnd.position * 100) / 100,
@@ -248,20 +232,19 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
   isSpeaking = false,
   onImageLoaded 
 }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoARef = useRef<HTMLVideoElement>(null);
   const videoBRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const activeVideoRef = useRef<'A' | 'B'>('A');
-  const switchingRef = useRef(false);
   const configRef = useRef<LoopConfig>(DEFAULT_CONFIG);
+  const activeVideoRef = useRef<'A' | 'B'>('A');
+  const crossfadeRef = useRef(0); // 0 = 全A, 1 = 全B
 
   const [customVideo, setCustomVideo] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
-  const [activeVideo, setActiveVideo] = useState<'A' | 'B'>('A');
   const [config, setConfig] = useState<LoopConfig>(DEFAULT_CONFIG);
   const [showSettings, setShowSettings] = useState(false);
   
-  // 分析相关状态
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
@@ -269,12 +252,10 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
 
   const src = customVideo || idleVideo;
 
-  // 同步 config 到 ref，供 rAF 回调使用
   useEffect(() => {
     configRef.current = config;
   }, [config]);
 
-  // 自动分析视频帧
   const handleAnalyze = useCallback(async () => {
     if (isAnalyzing) return;
     
@@ -293,7 +274,6 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
     }
   }, [src, isAnalyzing]);
 
-  // 应用推荐配置
   const applyRecommendation = useCallback(() => {
     if (!analysisResult) return;
     
@@ -305,66 +285,20 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
     setAnalysisApplied(true);
   }, [analysisResult]);
 
-  // 行业标杆无缝循环 + 可调循环区间 + 交叉淡入淡出
-  const setupSeamlessLoop = useCallback((currentSrc: string) => {
+  // === Canvas 渲染循环 - 彻底避免 DOM opacity 闪烁 ===
+  useEffect(() => {
+    const canvas = canvasRef.current;
     const videoA = videoARef.current;
     const videoB = videoBRef.current;
-    if (!videoA || !videoB) return;
+    if (!canvas || !videoA || !videoB) return;
 
-    const FRESH_FRAME_TIMEOUT_MS = 200;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) return;
 
-    let rafId: number | null = null;
     let destroyed = false;
-    let resetTimeoutId: number | null = null;
+    let rafId: number | null = null;
+    let switching = false;
 
-    const armedRef = { current: false };
-
-    const safePlay = async (v: HTMLVideoElement) => {
-      try {
-        await v.play();
-      } catch {
-        // muted + playsInline 通常允许自动播放
-      }
-    };
-
-    const waitNextFrame = (v: HTMLVideoElement) =>
-      new Promise<void>((resolve) => {
-        const anyV = v as any;
-        if (typeof anyV.requestVideoFrameCallback === 'function') {
-          anyV.requestVideoFrameCallback(() => resolve());
-          return;
-        }
-        setTimeout(() => requestAnimationFrame(() => resolve()), 0);
-      });
-
-    const waitFreshPresentedFrame = (v: HTMLVideoElement, timeoutMs: number) =>
-      new Promise<void>((resolve) => {
-        const start = performance.now();
-        const baseTime = v.currentTime;
-        const anyV = v as any;
-
-        if (typeof anyV.requestVideoFrameCallback === 'function') {
-          const tick = () => {
-            anyV.requestVideoFrameCallback((_now: number, metadata: any) => {
-              const mediaTime = typeof metadata?.mediaTime === 'number' ? metadata.mediaTime : v.currentTime;
-              if (mediaTime > baseTime + 0.0005) return resolve();
-              if (performance.now() - start > timeoutMs) return resolve();
-              tick();
-            });
-          };
-          tick();
-          return;
-        }
-
-        const check = () => {
-          if (v.currentTime > baseTime + 0.0005) return resolve();
-          if (performance.now() - start > timeoutMs) return resolve();
-          requestAnimationFrame(check);
-        };
-        requestAnimationFrame(check);
-      });
-
-    // 计算实际循环区间
     const getLoopBounds = (duration: number) => {
       const cfg = configRef.current;
       const loopStart = (cfg.loopStartPercent / 100) * duration;
@@ -372,206 +306,174 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       return { loopStart, loopEnd: Math.max(loopEnd, loopStart + 0.5) };
     };
 
-    const parkVideoAt = async (v: HTMLVideoElement, time: number) => {
-      // 让隐藏视频“停在”目标时间点：解码出一帧后暂停。
-      // 如果隐藏视频在后台继续播放，切换时可能出现跳帧/闪一下。
+    const safePlay = async (v: HTMLVideoElement) => {
       try {
-        v.pause();
-      } catch {
-        // ignore
-      }
-
-      try {
-        v.currentTime = time;
-      } catch {
-        // ignore
-      }
-
-      await safePlay(v);
-      await waitNextFrame(v);
-
-      try {
-        v.pause();
-      } catch {
-        // ignore
-      }
-
-      // 再停回目标点（有些浏览器 play 后会前进一小步）
-      try {
-        v.currentTime = time;
+        await v.play();
       } catch {
         // ignore
       }
     };
 
-    const primeVideo = async (v: HTMLVideoElement, startTime: number) => {
-      await parkVideoAt(v, startTime);
-    };
-
-    const resetHiddenToLoopStart = async (v: HTMLVideoElement, loopStart: number) => {
-      await parkVideoAt(v, loopStart);
-    };
-
-    const switchTo = async (nextKey: 'A' | 'B', loopStart: number) => {
-      if (switchingRef.current || destroyed) return;
-
-      const currentVideo = nextKey === 'A' ? videoB : videoA;
-      const nextVideo = nextKey === 'A' ? videoA : videoB;
-
-      switchingRef.current = true;
-      try {
-        // 如果掉帧错过预热窗口，这里补一次预热，避免切换到未解码画面
-        if (!armedRef.current) {
-          await primeVideo(nextVideo, loopStart);
-        } else {
-          // 防御：确保 nextVideo 仍停在 loopStart 附近
-          try {
-            if (Math.abs(nextVideo.currentTime - loopStart) > 0.08) nextVideo.currentTime = loopStart;
-          } catch {
-            // ignore
-          }
+    const seekAndPark = (v: HTMLVideoElement, time: number): Promise<void> => {
+      return new Promise((resolve) => {
+        const onSeeked = () => {
+          v.removeEventListener('seeked', onSeeked);
+          resolve();
+        };
+        v.addEventListener('seeked', onSeeked);
+        try {
+          v.pause();
+          v.currentTime = time;
+        } catch {
+          resolve();
         }
-
-        // 确保 nextVideo 已经在播放并产生过至少一帧
-        await safePlay(nextVideo);
-        await waitFreshPresentedFrame(nextVideo, FRESH_FRAME_TIMEOUT_MS);
-
-        activeVideoRef.current = nextKey;
-        setActiveVideo(nextKey);
-
-        // 重要：等淡出完成后再去 pause/seek 旧视频。
-        // 否则旧视频在 opacity 仍 > 0 时被 seek，会在画面上“闪一下”。
-        if (resetTimeoutId) window.clearTimeout(resetTimeoutId);
-        const delayMs = Math.max(0, configRef.current.crossfadeMs) + 34;
-        resetTimeoutId = window.setTimeout(() => {
-          if (destroyed) return;
-          void resetHiddenToLoopStart(currentVideo, loopStart);
-        }, delayMs);
-
-        armedRef.current = false;
-      } finally {
-        switchingRef.current = false;
-      }
-    };
-
-    const getActive = () => (activeVideoRef.current === 'A' ? videoA : videoB);
-    const getInactive = () => (activeVideoRef.current === 'A' ? videoB : videoA);
-
-    const monitor = async () => {
-      if (destroyed) return;
-
-      const current = getActive();
-      const inactive = getInactive();
-      const d = current.duration;
-
-      if (Number.isFinite(d) && d > 0) {
-        const { loopStart, loopEnd } = getLoopBounds(d);
-        const remaining = loopEnd - current.currentTime;
-
-        const switchLeadS = (() => {
-          const ms = Math.max(0, configRef.current.crossfadeMs);
-          // 切换尽量贴近 loopEnd：越贴近，首尾帧越容易匹配，闪烁越少
-          return Math.min(0.5, Math.max(0.08, ms / 1000));
-        })();
-        const armLeadS = Math.min(1.2, switchLeadS + 0.55);
-
-        // 提前预热下一段（让隐藏视频停在 loopStart，避免切换时解码/跳帧）
-        if (!armedRef.current && remaining <= armLeadS && remaining > switchLeadS) {
-          armedRef.current = true;
-          void primeVideo(inactive, loopStart);
-        }
-
-        // 临近结尾：切换到另一路
-        if (remaining <= switchLeadS) {
-          void switchTo(activeVideoRef.current === 'A' ? 'B' : 'A', loopStart);
-        }
-      }
-
-      rafId = requestAnimationFrame(() => {
-        void monitor();
       });
     };
 
-    // 初始化
-    destroyed = false;
-    switchingRef.current = false;
-    activeVideoRef.current = 'A';
-    setActiveVideo('A');
+    // 渲染单帧到 Canvas（可选混合两个视频）
+    const renderFrame = () => {
+      if (destroyed) return;
 
-    videoA.src = currentSrc;
-    videoB.src = currentSrc;
+      const w = canvas.width;
+      const h = canvas.height;
+      const cf = crossfadeRef.current;
 
-    try {
-      videoA.pause();
-      videoB.pause();
-      videoA.currentTime = 0;
-      videoB.currentTime = 0;
-    } catch {
-      // ignore
-    }
+      ctx.clearRect(0, 0, w, h);
 
-    videoA.load();
-    videoB.load();
+      // 如果正在 crossfade，绘制两个视频并混合
+      if (cf > 0 && cf < 1) {
+        // 先绘制 A (底层)
+        ctx.globalAlpha = 1 - cf;
+        try {
+          ctx.drawImage(videoA, 0, 0, w, h);
+        } catch {
+          // ignore decode errors
+        }
+        // 再绘制 B (叠加)
+        ctx.globalAlpha = cf;
+        try {
+          ctx.drawImage(videoB, 0, 0, w, h);
+        } catch {
+          // ignore
+        }
+        ctx.globalAlpha = 1;
+      } else {
+        // 单视频绘制
+        const activeV = activeVideoRef.current === 'A' ? videoA : videoB;
+        try {
+          ctx.drawImage(activeV, 0, 0, w, h);
+        } catch {
+          // ignore
+        }
+      }
+    };
 
-    const onCanPlayA = () => {
+    // 主循环：检测循环点、执行 crossfade、渲染 Canvas
+    const loop = () => {
+      if (destroyed) return;
+
+      const currentVideo = activeVideoRef.current === 'A' ? videoA : videoB;
+      const nextVideo = activeVideoRef.current === 'A' ? videoB : videoA;
+      const d = currentVideo.duration;
+
+      if (Number.isFinite(d) && d > 0) {
+        const { loopStart, loopEnd } = getLoopBounds(d);
+        const remaining = loopEnd - currentVideo.currentTime;
+        const crossfadeS = configRef.current.crossfadeMs / 1000;
+
+        // 开始 crossfade
+        if (!switching && remaining <= crossfadeS && remaining > 0) {
+          switching = true;
+
+          // 确保 nextVideo 从 loopStart 开始播放
+          (async () => {
+            await seekAndPark(nextVideo, loopStart);
+            await safePlay(nextVideo);
+
+            const startTime = performance.now();
+            const duration = configRef.current.crossfadeMs;
+
+            const animateCrossfade = () => {
+              if (destroyed) return;
+
+              const elapsed = performance.now() - startTime;
+              const progress = Math.min(1, elapsed / duration);
+
+              crossfadeRef.current = activeVideoRef.current === 'A' ? progress : 1 - progress;
+
+              if (progress < 1) {
+                requestAnimationFrame(animateCrossfade);
+              } else {
+                // crossfade 完成
+                crossfadeRef.current = 0;
+                activeVideoRef.current = activeVideoRef.current === 'A' ? 'B' : 'A';
+                
+                // 停止并重置旧视频
+                const oldVideo = activeVideoRef.current === 'A' ? videoB : videoA;
+                oldVideo.pause();
+                oldVideo.currentTime = loopStart;
+
+                switching = false;
+              }
+            };
+
+            requestAnimationFrame(animateCrossfade);
+          })();
+        }
+      }
+
+      renderFrame();
+      rafId = requestAnimationFrame(loop);
+    };
+
+    // 初始化视频
+    const initVideos = () => {
+      videoA.src = src;
+      videoB.src = src;
+      videoA.load();
+      videoB.load();
+    };
+
+    const onCanPlayA = async () => {
+      // 设置 Canvas 尺寸
+      canvas.width = videoA.videoWidth || 640;
+      canvas.height = videoA.videoHeight || 480;
+
       const d = videoA.duration;
       const { loopStart } = Number.isFinite(d) ? getLoopBounds(d) : { loopStart: 0 };
+
       videoA.currentTime = loopStart;
-      void safePlay(videoA);
+      await safePlay(videoA);
+
+      // 预加载 B
       if (Number.isFinite(d)) {
-        void primeVideo(videoB, loopStart);
+        await seekAndPark(videoB, loopStart);
       }
-    };
 
-    const onEndedA = () => {
-      if (activeVideoRef.current === 'A') {
-        const d = videoA.duration;
-        const { loopStart } = Number.isFinite(d) ? getLoopBounds(d) : { loopStart: 0 };
-        videoA.currentTime = loopStart;
-        void safePlay(videoA);
-      }
-    };
+      setIsLoaded(true);
+      onImageLoaded?.();
 
-    const onEndedB = () => {
-      if (activeVideoRef.current === 'B') {
-        const d = videoB.duration;
-        const { loopStart } = Number.isFinite(d) ? getLoopBounds(d) : { loopStart: 0 };
-        videoB.currentTime = loopStart;
-        void safePlay(videoB);
-      }
+      // 开始渲染循环
+      loop();
     };
 
     videoA.addEventListener('canplay', onCanPlayA, { once: true });
-    videoA.addEventListener('ended', onEndedA);
-    videoB.addEventListener('ended', onEndedB);
+    initVideos();
 
-    void monitor();
+    return () => {
+      destroyed = true;
+      if (rafId) cancelAnimationFrame(rafId);
+      videoA.pause();
+      videoB.pause();
+    };
+  }, [src, onImageLoaded]);
 
-     return () => {
-       destroyed = true;
-       if (rafId) cancelAnimationFrame(rafId);
-       if (resetTimeoutId) window.clearTimeout(resetTimeoutId);
-       videoA.removeEventListener('ended', onEndedA);
-       videoB.removeEventListener('ended', onEndedB);
-     };
-  }, []);
-
-  useEffect(() => {
-    const cleanup = setupSeamlessLoop(src);
-    return cleanup;
-  }, [src, setupSeamlessLoop]);
-
-  // Adjust playback rate based on speaking state
+  // 播放速率调整
   useEffect(() => {
     const rate = isSpeaking ? 1.15 : 1.0;
     if (videoARef.current) videoARef.current.playbackRate = rate;
     if (videoBRef.current) videoBRef.current.playbackRate = rate;
   }, [isSpeaking]);
-
-  const handleVideoLoad = () => {
-    setIsLoaded(true);
-    onImageLoaded?.();
-  };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -595,10 +497,6 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
     setAnalysisApplied(false);
   };
 
-  // 动态计算 crossfade transition
-  const crossfadeTransition = `opacity ${config.crossfadeMs}ms linear, filter 0.3s ease`;
-
-  // 获取置信度颜色
   const getConfidenceColor = (confidence: number) => {
     if (confidence >= 70) return 'text-green-500';
     if (confidence >= 40) return 'text-yellow-500';
@@ -615,38 +513,40 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         className="hidden"
       />
       
-      {/* 双缓冲视频 - 交叉淡入淡出实现无缝循环 */}
+      {/* 隐藏的双视频元素 - 仅用于解码 */}
       <video
         ref={videoARef}
-        src={src}
         muted
         playsInline
         preload="auto"
-        poster={posterImg}
-        onLoadedData={handleVideoLoad}
-        className="absolute inset-0 w-full h-full object-contain"
-        style={{
-          filter: isSpeaking ? 'brightness(1.05)' : 'brightness(1)',
-          transition: crossfadeTransition,
-          opacity: activeVideo === 'A' ? 1 : 0,
-          pointerEvents: activeVideo === 'A' ? 'auto' : 'none',
-        }}
+        className="hidden"
       />
       <video
         ref={videoBRef}
-        src={src}
         muted
         playsInline
         preload="auto"
-        poster={posterImg}
-        className="absolute inset-0 w-full h-full object-contain"
+        className="hidden"
+      />
+
+      {/* Canvas 渲染 - 无闪烁 */}
+      <canvas
+        ref={canvasRef}
+        className="w-full h-full object-contain"
         style={{
           filter: isSpeaking ? 'brightness(1.05)' : 'brightness(1)',
-          transition: crossfadeTransition,
-          opacity: activeVideo === 'B' ? 1 : 0,
-          pointerEvents: activeVideo === 'B' ? 'auto' : 'none',
+          transition: 'filter 0.3s ease',
         }}
       />
+
+      {/* Poster 图片 - 加载时显示 */}
+      {!isLoaded && (
+        <img
+          src={posterImg}
+          alt="Loading"
+          className="absolute inset-0 w-full h-full object-contain"
+        />
+      )}
 
       {/* Loading spinner */}
       {!isLoaded && (
@@ -657,7 +557,6 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
 
       {/* Controls */}
       <div className="absolute bottom-4 right-4 flex gap-2">
-        {/* 调参面板 */}
         <Popover open={showSettings} onOpenChange={setShowSettings}>
           <PopoverTrigger asChild>
             <Button
@@ -673,7 +572,6 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
             <div className="space-y-4">
               <h4 className="font-medium text-sm">无缝循环调参</h4>
               
-              {/* 智能分析按钮 */}
               <div className="space-y-2">
                 <Button
                   variant="outline"
@@ -699,7 +597,6 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
                   <Progress value={analysisProgress} className="h-1" />
                 )}
                 
-                {/* 分析结果 */}
                 {analysisResult && !isAnalyzing && (
                   <div className="p-3 bg-muted/50 rounded-lg space-y-2">
                     <div className="flex items-center justify-between">
@@ -738,11 +635,10 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
                 )}
               </div>
               
-              {/* 循环起点 */}
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
                   <Label>循环起点裁剪</Label>
-                  <span className="text-muted-foreground">{config.loopStartPercent.toFixed(0)}%</span>
+                  <span className="text-muted-foreground">{config.loopStartPercent.toFixed(2)}%</span>
                 </div>
                 <Slider
                   value={[config.loopStartPercent]}
@@ -752,16 +648,15 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
                   }}
                   min={0}
                   max={30}
-                  step={1}
+                  step={0.05}
                   className="w-full"
                 />
               </div>
 
-              {/* 循环终点 */}
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
                   <Label>循环终点裁剪</Label>
-                  <span className="text-muted-foreground">{config.loopEndPercent.toFixed(0)}%</span>
+                  <span className="text-muted-foreground">{config.loopEndPercent.toFixed(2)}%</span>
                 </div>
                 <Slider
                   value={[config.loopEndPercent]}
@@ -771,12 +666,11 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
                   }}
                   min={0}
                   max={30}
-                  step={1}
+                  step={0.05}
                   className="w-full"
                 />
               </div>
 
-              {/* 交叉淡入淡出 */}
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
                   <Label>交叉淡入淡出</Label>
@@ -793,7 +687,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
               </div>
 
               <p className="text-xs text-muted-foreground">
-                点击"智能分析"自动检测最佳循环点，或手动调整参数
+                Canvas 渲染模式 - 像素级混合无闪烁
               </p>
             </div>
           </PopoverContent>
