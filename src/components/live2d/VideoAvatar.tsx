@@ -1,6 +1,9 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Upload, RefreshCw } from 'lucide-react';
+import { Upload, RefreshCw, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Slider } from '@/components/ui/slider';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Label } from '@/components/ui/label';
 import idleVideo from '@/assets/character-idle.mp4';
 import posterImg from '@/assets/character-front.jpg';
 
@@ -8,6 +11,18 @@ interface VideoAvatarProps {
   isSpeaking?: boolean;
   onImageLoaded?: () => void;
 }
+
+interface LoopConfig {
+  loopStartPercent: number;   // 循环起点百分比 (0-50)
+  loopEndPercent: number;     // 循环终点百分比 (50-100，实际 = 100 - value)
+  crossfadeMs: number;        // 交叉淡入淡出时长 (50-500ms)
+}
+
+const DEFAULT_CONFIG: LoopConfig = {
+  loopStartPercent: 0,
+  loopEndPercent: 0,
+  crossfadeMs: 120,
+};
 
 const VideoAvatar: React.FC<VideoAvatarProps> = ({ 
   isSpeaking = false,
@@ -18,28 +33,31 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeVideoRef = useRef<'A' | 'B'>('A');
   const switchingRef = useRef(false);
+  const configRef = useRef<LoopConfig>(DEFAULT_CONFIG);
 
   const [customVideo, setCustomVideo] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [activeVideo, setActiveVideo] = useState<'A' | 'B'>('A');
+  const [config, setConfig] = useState<LoopConfig>(DEFAULT_CONFIG);
+  const [showSettings, setShowSettings] = useState(false);
 
   const src = customVideo || idleVideo;
 
+  // 同步 config 到 ref，供 rAF 回调使用
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
 
-  // 行业标杆无缝循环：
-  // 1) 用 rAF 高频监测剩余时间（避免 timeupdate 低频导致错过切点）
-  // 2) 提前“预热”下一段：先播放到解码出首帧后立刻暂停
-  // 3) 临近结尾时再瞬时切换到已预热的视频并继续播放，避免结尾解码停顿/静止帧
+  // 行业标杆无缝循环 + 可调循环区间 + 交叉淡入淡出
   const setupSeamlessLoop = useCallback((currentSrc: string) => {
     const videoA = videoARef.current;
     const videoB = videoBRef.current;
     if (!videoA || !videoB) return;
 
-    // 预热阈值要明显早于切换阈值，否则来不及解码会出现“卡一下/静止帧”
+    // 预热阈值
     const ARM_THRESHOLD_S = 0.8;
-    const SWITCH_THRESHOLD_S = 0.28;
-    // 关键：切换可见层之前，要确保 nextVideo 已经“渲染出新帧”，否则会看到闪/黑/静止帧
-    const FRESH_FRAME_TIMEOUT_MS = 250;
+    const SWITCH_THRESHOLD_S = 0.32;
+    const FRESH_FRAME_TIMEOUT_MS = 200;
 
     let rafId: number | null = null;
     let destroyed = false;
@@ -50,7 +68,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       try {
         await v.play();
       } catch {
-        // muted + playsInline 通常允许自动播放；失败也不应让循环崩掉
+        // muted + playsInline 通常允许自动播放
       }
     };
 
@@ -70,7 +88,6 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         const baseTime = v.currentTime;
         const anyV = v as any;
 
-        // 优先用 requestVideoFrameCallback：确保“真的呈现出一帧”
         if (typeof anyV.requestVideoFrameCallback === 'function') {
           const tick = () => {
             anyV.requestVideoFrameCallback((_now: number, metadata: any) => {
@@ -84,7 +101,6 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
           return;
         }
 
-        // 兜底：rAF 轮询 currentTime 前进
         const check = () => {
           if (v.currentTime > baseTime + 0.0005) return resolve();
           if (performance.now() - start > timeoutMs) return resolve();
@@ -93,23 +109,29 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         requestAnimationFrame(check);
       });
 
-    const primeVideo = async (v: HTMLVideoElement) => {
-      // 把下一段预热到“首帧已解码”，但不要让它持续播放（避免跑到结尾）
+    // 计算实际循环区间
+    const getLoopBounds = (duration: number) => {
+      const cfg = configRef.current;
+      const loopStart = (cfg.loopStartPercent / 100) * duration;
+      const loopEnd = duration - (cfg.loopEndPercent / 100) * duration;
+      return { loopStart, loopEnd: Math.max(loopEnd, loopStart + 0.5) };
+    };
+
+    const primeVideo = async (v: HTMLVideoElement, startTime: number) => {
       try {
         v.pause();
-        v.currentTime = 0;
+        v.currentTime = startTime;
       } catch {
         // ignore
       }
 
-      // 强制浏览器开始拉取/解码
       v.load();
       await safePlay(v);
       await waitNextFrame(v);
       v.pause();
     };
 
-    const switchTo = async (nextKey: 'A' | 'B') => {
+    const switchTo = async (nextKey: 'A' | 'B', loopStart: number) => {
       if (switchingRef.current || destroyed) return;
 
       const currentVideo = nextKey === 'A' ? videoB : videoA;
@@ -117,20 +139,15 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
 
       switchingRef.current = true;
       try {
-        // 注意：不要在这里 nextVideo.currentTime = 0。
-        // 因为 primeVideo 已经把 nextVideo 预热到首帧，强行回到 0 反而会触发重新解码，导致“闪一下”。
         await safePlay(nextVideo);
-
-        // 等 nextVideo 呈现出一帧“新画面”再切可见层
         await waitFreshPresentedFrame(nextVideo, FRESH_FRAME_TIMEOUT_MS);
 
         activeVideoRef.current = nextKey;
         setActiveVideo(nextKey);
 
-        // 当前视频变成“下一次的缓冲”，重置并重新 load
         currentVideo.pause();
         try {
-          currentVideo.currentTime = 0;
+          currentVideo.currentTime = loopStart;
         } catch {
           // ignore
         }
@@ -153,17 +170,23 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       const d = current.duration;
 
       if (Number.isFinite(d) && d > 0) {
-        const remaining = d - current.currentTime;
+        const { loopStart, loopEnd } = getLoopBounds(d);
+        const remaining = loopEnd - current.currentTime;
 
         // 提前预热下一段
         if (!armedRef.current && remaining <= ARM_THRESHOLD_S && remaining > SWITCH_THRESHOLD_S) {
           armedRef.current = true;
-          void primeVideo(inactive);
+          void primeVideo(inactive, loopStart);
         }
 
         // 临近结尾：瞬时切换
         if (remaining <= SWITCH_THRESHOLD_S && remaining > 0) {
-          void switchTo(activeVideoRef.current === 'A' ? 'B' : 'A');
+          void switchTo(activeVideoRef.current === 'A' ? 'B' : 'A', loopStart);
+        }
+
+        // 如果超过 loopEnd（极端情况），立即跳回
+        if (current.currentTime >= loopEnd) {
+          current.currentTime = loopStart;
         }
       }
 
@@ -172,7 +195,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       });
     };
 
-    // 初始化：保证两路都指向同一 src，A 可见播放，B 预热缓冲
+    // 初始化
     destroyed = false;
     switchingRef.current = false;
     activeVideoRef.current = 'A';
@@ -194,22 +217,29 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
     videoB.load();
 
     const onCanPlayA = () => {
+      const d = videoA.duration;
+      const { loopStart } = Number.isFinite(d) ? getLoopBounds(d) : { loopStart: 0 };
+      videoA.currentTime = loopStart;
       void safePlay(videoA);
-      // 先把 B 预热好，避免第一次循环边界就卡一下
-      void primeVideo(videoB);
+      if (Number.isFinite(d)) {
+        void primeVideo(videoB, loopStart);
+      }
     };
 
     const onEndedA = () => {
-      // 极端兜底：就算切换没发生也不允许停住
       if (activeVideoRef.current === 'A') {
-        videoA.currentTime = 0;
+        const d = videoA.duration;
+        const { loopStart } = Number.isFinite(d) ? getLoopBounds(d) : { loopStart: 0 };
+        videoA.currentTime = loopStart;
         void safePlay(videoA);
       }
     };
 
     const onEndedB = () => {
       if (activeVideoRef.current === 'B') {
-        videoB.currentTime = 0;
+        const d = videoB.duration;
+        const { loopStart } = Number.isFinite(d) ? getLoopBounds(d) : { loopStart: 0 };
+        videoB.currentTime = loopStart;
         void safePlay(videoB);
       }
     };
@@ -260,7 +290,11 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
     }
     setCustomVideo(null);
     setIsLoaded(false);
+    setConfig(DEFAULT_CONFIG);
   };
+
+  // 动态计算 crossfade transition
+  const crossfadeTransition = `opacity ${config.crossfadeMs}ms linear, filter 0.3s ease`;
 
   return (
     <div className="relative w-full h-full flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-secondary/5 rounded-xl overflow-hidden">
@@ -272,7 +306,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         className="hidden"
       />
       
-      {/* 双缓冲视频 - 瞬时切换实现无缝循环 */}
+      {/* 双缓冲视频 - 交叉淡入淡出实现无缝循环 */}
       <video
         ref={videoARef}
         src={src}
@@ -284,7 +318,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         className="absolute inset-0 w-full h-full object-contain"
         style={{
           filter: isSpeaking ? 'brightness(1.05)' : 'brightness(1)',
-          transition: 'opacity 140ms linear, filter 0.3s ease',
+          transition: crossfadeTransition,
           opacity: activeVideo === 'A' ? 1 : 0,
           pointerEvents: activeVideo === 'A' ? 'auto' : 'none',
         }}
@@ -299,7 +333,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         className="absolute inset-0 w-full h-full object-contain"
         style={{
           filter: isSpeaking ? 'brightness(1.05)' : 'brightness(1)',
-          transition: 'opacity 140ms linear, filter 0.3s ease',
+          transition: crossfadeTransition,
           opacity: activeVideo === 'B' ? 1 : 0,
           pointerEvents: activeVideo === 'B' ? 'auto' : 'none',
         }}
@@ -314,6 +348,77 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
 
       {/* Controls */}
       <div className="absolute bottom-4 right-4 flex gap-2">
+        {/* 调参面板 */}
+        <Popover open={showSettings} onOpenChange={setShowSettings}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="secondary"
+              size="icon"
+              className="h-8 w-8 bg-background/80 backdrop-blur-sm hover:bg-background/90"
+              title="循环调参"
+            >
+              <Settings2 className="h-4 w-4" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-72" side="top" align="end">
+            <div className="space-y-4">
+              <h4 className="font-medium text-sm">无缝循环调参</h4>
+              
+              {/* 循环起点 */}
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <Label>循环起点裁剪</Label>
+                  <span className="text-muted-foreground">{config.loopStartPercent.toFixed(0)}%</span>
+                </div>
+                <Slider
+                  value={[config.loopStartPercent]}
+                  onValueChange={([v]) => setConfig(c => ({ ...c, loopStartPercent: v }))}
+                  min={0}
+                  max={30}
+                  step={1}
+                  className="w-full"
+                />
+              </div>
+
+              {/* 循环终点 */}
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <Label>循环终点裁剪</Label>
+                  <span className="text-muted-foreground">{config.loopEndPercent.toFixed(0)}%</span>
+                </div>
+                <Slider
+                  value={[config.loopEndPercent]}
+                  onValueChange={([v]) => setConfig(c => ({ ...c, loopEndPercent: v }))}
+                  min={0}
+                  max={30}
+                  step={1}
+                  className="w-full"
+                />
+              </div>
+
+              {/* 交叉淡入淡出 */}
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <Label>交叉淡入淡出</Label>
+                  <span className="text-muted-foreground">{config.crossfadeMs}ms</span>
+                </div>
+                <Slider
+                  value={[config.crossfadeMs]}
+                  onValueChange={([v]) => setConfig(c => ({ ...c, crossfadeMs: v }))}
+                  min={50}
+                  max={400}
+                  step={10}
+                  className="w-full"
+                />
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                裁剪掉首尾不连贯帧，配合淡入淡出实现平滑过渡
+              </p>
+            </div>
+          </PopoverContent>
+        </Popover>
+
         <Button
           variant="secondary"
           size="icon"
