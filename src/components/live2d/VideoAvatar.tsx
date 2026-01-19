@@ -25,34 +25,71 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
 
   const src = customVideo || idleVideo;
 
-  // 行业标杆无缝循环：双 video 双缓冲，在结束前瞬时切换到已预加载视频，避免结尾解码停顿
-  const setupSeamlessLoop = useCallback(() => {
+
+  // 行业标杆无缝循环：
+  // 1) 用 rAF 高频监测剩余时间（避免 timeupdate 低频导致错过切点）
+  // 2) 提前“预热”下一段：先播放到解码出首帧后立刻暂停
+  // 3) 临近结尾时再瞬时切换到已预热的视频并继续播放，避免结尾解码停顿/静止帧
+  const setupSeamlessLoop = useCallback((currentSrc: string) => {
     const videoA = videoARef.current;
     const videoB = videoBRef.current;
     if (!videoA || !videoB) return;
 
-    const SWITCH_THRESHOLD = 0.18; // 稍提前一点，给解码/渲染留余量
+    // 预热阈值要明显早于切换阈值，否则来不及解码会出现“卡一下/静止帧”
+    const ARM_THRESHOLD_S = 0.8;
+    const SWITCH_THRESHOLD_S = 0.28;
+    const MIN_PROGRESS_S = 0.03; // 切过去前确保已经推进一点点（避免显示首帧定住）
+
+    let rafId: number | null = null;
+    let destroyed = false;
+
+    const armedRef = { current: false };
 
     const safePlay = async (v: HTMLVideoElement) => {
       try {
         await v.play();
       } catch {
-        // muted + playsInline normally allows autoplay; ignore failures but don't break loop
+        // muted + playsInline 通常允许自动播放；失败也不应让循环崩掉
       }
     };
 
-    const canSwitchTo = (v: HTMLVideoElement) => v.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+    const waitNextFrame = (v: HTMLVideoElement) =>
+      new Promise<void>((resolve) => {
+        // requestVideoFrameCallback 最稳（Chrome/Edge/部分 Safari）
+        const anyV = v as any;
+        if (typeof anyV.requestVideoFrameCallback === 'function') {
+          anyV.requestVideoFrameCallback(() => resolve());
+          return;
+        }
+        // 兜底：至少等一个宏任务 + rAF
+        setTimeout(() => requestAnimationFrame(() => resolve()), 0);
+      });
 
-    const doSwitch = async (currentVideo: HTMLVideoElement, nextVideo: HTMLVideoElement, nextKey: 'A' | 'B') => {
-      if (switchingRef.current) return;
-      if (!canSwitchTo(nextVideo)) {
-        // 还没解码到可播放帧：触发加载但不切换，避免切过去定住
-        nextVideo.load();
-        return;
+    const primeVideo = async (v: HTMLVideoElement) => {
+      // 把下一段预热到“首帧已解码”，但不要让它持续播放（避免跑到结尾）
+      try {
+        v.pause();
+        v.currentTime = 0;
+      } catch {
+        // ignore
       }
+
+      // 强制浏览器开始拉取/解码
+      v.load();
+      await safePlay(v);
+      await waitNextFrame(v);
+      v.pause();
+    };
+
+    const switchTo = async (nextKey: 'A' | 'B') => {
+      if (switchingRef.current || destroyed) return;
+
+      const currentVideo = nextKey === 'A' ? videoB : videoA;
+      const nextVideo = nextKey === 'A' ? videoA : videoB;
 
       switchingRef.current = true;
       try {
+        // 重新从 0 播放，并确保“真的开始动了”再切可见层
         try {
           nextVideo.currentTime = 0;
         } catch {
@@ -61,60 +98,71 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
 
         await safePlay(nextVideo);
 
+        // 等到 nextVideo 至少推进一点点（避免切过去显示首帧静止）
+        const start = performance.now();
+        while (!destroyed) {
+          if (nextVideo.currentTime >= MIN_PROGRESS_S) break;
+          await waitNextFrame(nextVideo);
+          // 兜底：最多等 250ms，防止死等
+          if (performance.now() - start > 250) break;
+        }
+
         activeVideoRef.current = nextKey;
         setActiveVideo(nextKey);
 
+        // 当前视频变成“下一次的缓冲”，重置并重新 load
         currentVideo.pause();
         try {
           currentVideo.currentTime = 0;
         } catch {
           // ignore
         }
-
-        // 让旧视频重新进入“可播放”状态，作为下一次切换的缓冲
         currentVideo.load();
+
+        armedRef.current = false;
       } finally {
         switchingRef.current = false;
       }
     };
 
-    const handleTimeUpdate = (currentVideo: HTMLVideoElement, nextVideo: HTMLVideoElement, nextKey: 'A' | 'B') => {
-      const d = currentVideo.duration;
-      if (!Number.isFinite(d) || d <= 0) return;
+    const getActive = () => (activeVideoRef.current === 'A' ? videoA : videoB);
+    const getInactive = () => (activeVideoRef.current === 'A' ? videoB : videoA);
 
-      const remaining = d - currentVideo.currentTime;
-      if (remaining <= SWITCH_THRESHOLD && remaining > 0) {
-        void doSwitch(currentVideo, nextVideo, nextKey);
+    const monitor = async () => {
+      if (destroyed) return;
+
+      const current = getActive();
+      const inactive = getInactive();
+      const d = current.duration;
+
+      if (Number.isFinite(d) && d > 0) {
+        const remaining = d - current.currentTime;
+
+        // 提前预热下一段
+        if (!armedRef.current && remaining <= ARM_THRESHOLD_S && remaining > SWITCH_THRESHOLD_S) {
+          armedRef.current = true;
+          void primeVideo(inactive);
+        }
+
+        // 临近结尾：瞬时切换
+        if (remaining <= SWITCH_THRESHOLD_S && remaining > 0) {
+          void switchTo(activeVideoRef.current === 'A' ? 'B' : 'A');
+        }
       }
+
+      rafId = requestAnimationFrame(() => {
+        void monitor();
+      });
     };
 
-    const onTimeUpdateA = () => handleTimeUpdate(videoA, videoB, 'B');
-    const onTimeUpdateB = () => handleTimeUpdate(videoB, videoA, 'A');
-
-    const onEndedA = () => {
-      // 兜底：万一没赶上切换，至少不要停住
-      if (activeVideoRef.current === 'A') {
-        videoA.currentTime = 0;
-        void safePlay(videoA);
-      }
-    };
-
-    const onEndedB = () => {
-      if (activeVideoRef.current === 'B') {
-        videoB.currentTime = 0;
-        void safePlay(videoB);
-      }
-    };
-
-    videoA.addEventListener('timeupdate', onTimeUpdateA);
-    videoB.addEventListener('timeupdate', onTimeUpdateB);
-    videoA.addEventListener('ended', onEndedA);
-    videoB.addEventListener('ended', onEndedB);
-
-    // 初始化：A播放，B做缓冲（都先load，避免后续切换时没解码帧导致定住）
+    // 初始化：保证两路都指向同一 src，A 可见播放，B 预热缓冲
+    destroyed = false;
     switchingRef.current = false;
     activeVideoRef.current = 'A';
     setActiveVideo('A');
+
+    videoA.src = currentSrc;
+    videoB.src = currentSrc;
 
     try {
       videoA.pause();
@@ -130,22 +178,41 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
 
     const onCanPlayA = () => {
       void safePlay(videoA);
-      videoA.removeEventListener('canplay', onCanPlayA);
+      // 先把 B 预热好，避免第一次循环边界就卡一下
+      void primeVideo(videoB);
     };
 
-    videoA.addEventListener('canplay', onCanPlayA);
+    const onEndedA = () => {
+      // 极端兜底：就算切换没发生也不允许停住
+      if (activeVideoRef.current === 'A') {
+        videoA.currentTime = 0;
+        void safePlay(videoA);
+      }
+    };
+
+    const onEndedB = () => {
+      if (activeVideoRef.current === 'B') {
+        videoB.currentTime = 0;
+        void safePlay(videoB);
+      }
+    };
+
+    videoA.addEventListener('canplay', onCanPlayA, { once: true });
+    videoA.addEventListener('ended', onEndedA);
+    videoB.addEventListener('ended', onEndedB);
+
+    void monitor();
 
     return () => {
-      videoA.removeEventListener('timeupdate', onTimeUpdateA);
-      videoB.removeEventListener('timeupdate', onTimeUpdateB);
+      destroyed = true;
+      if (rafId) cancelAnimationFrame(rafId);
       videoA.removeEventListener('ended', onEndedA);
       videoB.removeEventListener('ended', onEndedB);
-      videoA.removeEventListener('canplay', onCanPlayA);
     };
   }, []);
 
   useEffect(() => {
-    const cleanup = setupSeamlessLoop();
+    const cleanup = setupSeamlessLoop(src);
     return cleanup;
   }, [src, setupSeamlessLoop]);
 
