@@ -266,9 +266,6 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
     const videoB = videoBRef.current;
     if (!videoA || !videoB) return;
 
-    // 预热阈值
-    const ARM_THRESHOLD_S = 0.8;
-    const SWITCH_THRESHOLD_S = 0.32;
     const FRESH_FRAME_TIMEOUT_MS = 200;
 
     let rafId: number | null = null;
@@ -330,20 +327,9 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       return { loopStart, loopEnd: Math.max(loopEnd, loopStart + 0.5) };
     };
 
-    const primeVideo = async (v: HTMLVideoElement, startTime: number) => {
-      // 让“隐藏视频”提前跑起来，避免切换时黑帧/闪烁
-      try {
-        v.currentTime = startTime;
-      } catch {
-        // ignore
-      }
-
-      await safePlay(v);
-      await waitNextFrame(v);
-    };
-
-    const resetHiddenToLoopStart = async (v: HTMLVideoElement, loopStart: number) => {
-      // 隐藏态重置：pause -> seek -> play（不再 load，避免 poster/黑帧闪一下）
+    const parkVideoAt = async (v: HTMLVideoElement, time: number) => {
+      // 让隐藏视频“停在”目标时间点：解码出一帧后暂停。
+      // 如果隐藏视频在后台继续播放，切换时可能出现跳帧/闪一下。
       try {
         v.pause();
       } catch {
@@ -351,12 +337,34 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       }
 
       try {
-        v.currentTime = loopStart;
+        v.currentTime = time;
       } catch {
         // ignore
       }
 
       await safePlay(v);
+      await waitNextFrame(v);
+
+      try {
+        v.pause();
+      } catch {
+        // ignore
+      }
+
+      // 再停回目标点（有些浏览器 play 后会前进一小步）
+      try {
+        v.currentTime = time;
+      } catch {
+        // ignore
+      }
+    };
+
+    const primeVideo = async (v: HTMLVideoElement, startTime: number) => {
+      await parkVideoAt(v, startTime);
+    };
+
+    const resetHiddenToLoopStart = async (v: HTMLVideoElement, loopStart: number) => {
+      await parkVideoAt(v, loopStart);
     };
 
     const switchTo = async (nextKey: 'A' | 'B', loopStart: number) => {
@@ -367,6 +375,18 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
 
       switchingRef.current = true;
       try {
+        // 如果掉帧错过预热窗口，这里补一次预热，避免切换到未解码画面
+        if (!armedRef.current) {
+          await primeVideo(nextVideo, loopStart);
+        } else {
+          // 防御：确保 nextVideo 仍停在 loopStart 附近
+          try {
+            if (Math.abs(nextVideo.currentTime - loopStart) > 0.08) nextVideo.currentTime = loopStart;
+          } catch {
+            // ignore
+          }
+        }
+
         // 确保 nextVideo 已经在播放并产生过至少一帧
         await safePlay(nextVideo);
         await waitFreshPresentedFrame(nextVideo, FRESH_FRAME_TIMEOUT_MS);
@@ -403,14 +423,21 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         const { loopStart, loopEnd } = getLoopBounds(d);
         const remaining = loopEnd - current.currentTime;
 
-        // 提前预热下一段（让隐藏视频跑起来）
-        if (!armedRef.current && remaining <= ARM_THRESHOLD_S && remaining > SWITCH_THRESHOLD_S) {
+        const switchLeadS = (() => {
+          const ms = Math.max(0, configRef.current.crossfadeMs);
+          // 切换尽量贴近 loopEnd：越贴近，首尾帧越容易匹配，闪烁越少
+          return Math.min(0.5, Math.max(0.08, ms / 1000));
+        })();
+        const armLeadS = Math.min(1.2, switchLeadS + 0.55);
+
+        // 提前预热下一段（让隐藏视频停在 loopStart，避免切换时解码/跳帧）
+        if (!armedRef.current && remaining <= armLeadS && remaining > switchLeadS) {
           armedRef.current = true;
           void primeVideo(inactive, loopStart);
         }
 
-        // 临近结尾：切换到另一路（不再对“可见视频”做跳回 seek，避免闪一下）
-        if (remaining <= SWITCH_THRESHOLD_S) {
+        // 临近结尾：切换到另一路
+        if (remaining <= switchLeadS) {
           void switchTo(activeVideoRef.current === 'A' ? 'B' : 'A', loopStart);
         }
       }
