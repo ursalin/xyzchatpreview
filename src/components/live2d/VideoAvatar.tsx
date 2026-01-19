@@ -38,7 +38,8 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
     // 预热阈值要明显早于切换阈值，否则来不及解码会出现“卡一下/静止帧”
     const ARM_THRESHOLD_S = 0.8;
     const SWITCH_THRESHOLD_S = 0.28;
-    const MIN_PROGRESS_S = 0.03; // 切过去前确保已经推进一点点（避免显示首帧定住）
+    // 关键：切换可见层之前，要确保 nextVideo 已经“渲染出新帧”，否则会看到闪/黑/静止帧
+    const FRESH_FRAME_TIMEOUT_MS = 250;
 
     let rafId: number | null = null;
     let destroyed = false;
@@ -55,14 +56,41 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
 
     const waitNextFrame = (v: HTMLVideoElement) =>
       new Promise<void>((resolve) => {
-        // requestVideoFrameCallback 最稳（Chrome/Edge/部分 Safari）
         const anyV = v as any;
         if (typeof anyV.requestVideoFrameCallback === 'function') {
           anyV.requestVideoFrameCallback(() => resolve());
           return;
         }
-        // 兜底：至少等一个宏任务 + rAF
         setTimeout(() => requestAnimationFrame(() => resolve()), 0);
+      });
+
+    const waitFreshPresentedFrame = (v: HTMLVideoElement, timeoutMs: number) =>
+      new Promise<void>((resolve) => {
+        const start = performance.now();
+        const baseTime = v.currentTime;
+        const anyV = v as any;
+
+        // 优先用 requestVideoFrameCallback：确保“真的呈现出一帧”
+        if (typeof anyV.requestVideoFrameCallback === 'function') {
+          const tick = () => {
+            anyV.requestVideoFrameCallback((_now: number, metadata: any) => {
+              const mediaTime = typeof metadata?.mediaTime === 'number' ? metadata.mediaTime : v.currentTime;
+              if (mediaTime > baseTime + 0.0005) return resolve();
+              if (performance.now() - start > timeoutMs) return resolve();
+              tick();
+            });
+          };
+          tick();
+          return;
+        }
+
+        // 兜底：rAF 轮询 currentTime 前进
+        const check = () => {
+          if (v.currentTime > baseTime + 0.0005) return resolve();
+          if (performance.now() - start > timeoutMs) return resolve();
+          requestAnimationFrame(check);
+        };
+        requestAnimationFrame(check);
       });
 
     const primeVideo = async (v: HTMLVideoElement) => {
@@ -89,23 +117,12 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
 
       switchingRef.current = true;
       try {
-        // 重新从 0 播放，并确保“真的开始动了”再切可见层
-        try {
-          nextVideo.currentTime = 0;
-        } catch {
-          // ignore
-        }
-
+        // 注意：不要在这里 nextVideo.currentTime = 0。
+        // 因为 primeVideo 已经把 nextVideo 预热到首帧，强行回到 0 反而会触发重新解码，导致“闪一下”。
         await safePlay(nextVideo);
 
-        // 等到 nextVideo 至少推进一点点（避免切过去显示首帧静止）
-        const start = performance.now();
-        while (!destroyed) {
-          if (nextVideo.currentTime >= MIN_PROGRESS_S) break;
-          await waitNextFrame(nextVideo);
-          // 兜底：最多等 250ms，防止死等
-          if (performance.now() - start > 250) break;
-        }
+        // 等 nextVideo 呈现出一帧“新画面”再切可见层
+        await waitFreshPresentedFrame(nextVideo, FRESH_FRAME_TIMEOUT_MS);
 
         activeVideoRef.current = nextKey;
         setActiveVideo(nextKey);
@@ -278,6 +295,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         muted
         playsInline
         preload="auto"
+        poster={posterImg}
         className="absolute inset-0 w-full h-full object-contain"
         style={{
           filter: isSpeaking ? 'brightness(1.05)' : 'brightness(1)',
