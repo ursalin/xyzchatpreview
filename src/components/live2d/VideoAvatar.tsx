@@ -1,10 +1,11 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Upload, RefreshCw, Settings2, Scan, Loader2, Check } from 'lucide-react';
+import { Upload, RefreshCw, Settings2, Scan, Loader2, Check, Bug, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import idleVideo from '@/assets/character-idle.mp4';
 import posterImg from '@/assets/character-front.jpg';
 
@@ -30,6 +31,35 @@ interface AnalysisResult {
   startFrames: FrameAnalysis[];
   endFrames: FrameAnalysis[];
   confidence: number;
+}
+
+interface DiagnosticsState {
+  activeVideo: 'A' | 'B';
+  crossfade: number;
+  videoA: {
+    readyState: number;
+    seeking: boolean;
+    currentTime: number;
+    paused: boolean;
+  };
+  videoB: {
+    readyState: number;
+    seeking: boolean;
+    currentTime: number;
+    paused: boolean;
+  };
+  loopStart: number;
+  loopEnd: number;
+  remaining: number;
+}
+
+interface DrawFailLog {
+  time: number;
+  video: 'A' | 'B';
+  readyState: number;
+  seeking: boolean;
+  currentTime: number;
+  reason: string;
 }
 
 const DEFAULT_CONFIG: LoopConfig = {
@@ -249,6 +279,21 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [analysisApplied, setAnalysisApplied] = useState(false);
+  
+  // 诊断面板状态
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<DiagnosticsState | null>(null);
+  const [drawFailLogs, setDrawFailLogs] = useState<DrawFailLog[]>([]);
+  const diagnosticsRef = useRef({ enabled: false });
+  const drawFailLogsRef = useRef<DrawFailLog[]>([]);
+
+  // 同步诊断面板开关
+  useEffect(() => {
+    diagnosticsRef.current.enabled = showDiagnostics;
+    if (showDiagnostics) {
+      setDrawFailLogs([...drawFailLogsRef.current]);
+    }
+  }, [showDiagnostics]);
 
   const src = customVideo || idleVideo;
 
@@ -284,6 +329,11 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
     }));
     setAnalysisApplied(true);
   }, [analysisResult]);
+
+  const clearDrawFailLogs = useCallback(() => {
+    drawFailLogsRef.current = [];
+    setDrawFailLogs([]);
+  }, []);
 
   // === Canvas 渲染循环 - 彻底避免 DOM opacity 闪烁 ===
   useEffect(() => {
@@ -370,16 +420,64 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       });
     };
 
-    const drawVideo = (v: HTMLVideoElement) => {
-      // 关键：不要 clearRect。否则 drawImage 失败/解码空窗时会直接“黑一下”。
-      if (v.readyState < 2 || v.seeking) return false;
+    const logDrawFail = (video: 'A' | 'B', v: HTMLVideoElement, reason: string) => {
+      if (!diagnosticsRef.current.enabled) return;
+      const log: DrawFailLog = {
+        time: performance.now(),
+        video,
+        readyState: v.readyState,
+        seeking: v.seeking,
+        currentTime: v.currentTime,
+        reason
+      };
+      drawFailLogsRef.current = [...drawFailLogsRef.current.slice(-49), log];
+      setDrawFailLogs([...drawFailLogsRef.current]);
+    };
+
+    const drawVideo = (v: HTMLVideoElement, videoLabel: 'A' | 'B') => {
+      // 关键：不要 clearRect。否则 drawImage 失败/解码空窗时会直接"黑一下"。
+      if (v.readyState < 2) {
+        logDrawFail(videoLabel, v, `readyState=${v.readyState} < 2`);
+        return false;
+      }
+      if (v.seeking) {
+        logDrawFail(videoLabel, v, 'seeking=true');
+        return false;
+      }
       try {
         ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
         hasDrawnOnce = true;
         return true;
-      } catch {
+      } catch (e) {
+        logDrawFail(videoLabel, v, `drawImage error: ${e}`);
         return false;
       }
+    };
+
+    const updateDiagnostics = () => {
+      if (!diagnosticsRef.current.enabled) return;
+      const d = videoA.duration;
+      const { loopStart, loopEnd } = Number.isFinite(d) && d > 0 ? getLoopBounds(d) : { loopStart: 0, loopEnd: 0 };
+      const currentVideo = activeVideoRef.current === 'A' ? videoA : videoB;
+      setDiagnostics({
+        activeVideo: activeVideoRef.current,
+        crossfade: crossfadeRef.current,
+        videoA: {
+          readyState: videoA.readyState,
+          seeking: videoA.seeking,
+          currentTime: videoA.currentTime,
+          paused: videoA.paused
+        },
+        videoB: {
+          readyState: videoB.readyState,
+          seeking: videoB.seeking,
+          currentTime: videoB.currentTime,
+          paused: videoB.paused
+        },
+        loopStart,
+        loopEnd,
+        remaining: loopEnd - currentVideo.currentTime
+      });
     };
 
     // 渲染单帧到 Canvas（可选混合两个视频）
@@ -389,30 +487,34 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       const cf = crossfadeRef.current;
 
       if (cf > 0 && cf < 1) {
-        // A/B 混合：只绘制“可画”的那一方；两者都不可画则保留上一帧
+        // A/B 混合：只绘制"可画"的那一方；两者都不可画则保留上一帧
         const canA = videoA.readyState >= 2 && !videoA.seeking;
         const canB = videoB.readyState >= 2 && !videoB.seeking;
 
-        if (!canA && !canB) return;
+        if (!canA && !canB) {
+          logDrawFail('A', videoA, 'crossfade: both videos not drawable');
+          return;
+        }
 
         if (canA && canB) {
           ctx.globalAlpha = 1 - cf;
-          drawVideo(videoA);
+          drawVideo(videoA, 'A');
           ctx.globalAlpha = cf;
-          drawVideo(videoB);
+          drawVideo(videoB, 'B');
           ctx.globalAlpha = 1;
           return;
         }
 
         // 只剩一边可画时直接全量绘制，避免 alpha 清空导致闪
         ctx.globalAlpha = 1;
-        if (canA) drawVideo(videoA);
-        else if (canB) drawVideo(videoB);
+        if (canA) drawVideo(videoA, 'A');
+        else if (canB) drawVideo(videoB, 'B');
         return;
       }
 
       const activeV = activeVideoRef.current === 'A' ? videoA : videoB;
-      const ok = drawVideo(activeV);
+      const activeLabel = activeVideoRef.current;
+      const ok = drawVideo(activeV, activeLabel);
       if (!ok && !hasDrawnOnce) {
         // 首帧还没拿到：让 poster 继续盖住
       }
@@ -477,6 +579,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       }
 
       renderFrame();
+      updateDiagnostics();
       rafId = requestAnimationFrame(loop);
     };
 
@@ -496,7 +599,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       const d = videoA.duration;
       const { loopStart } = Number.isFinite(d) ? getLoopBounds(d) : { loopStart: 0 };
 
-      // A：先 seek 再 play，再等一帧，确保 Canvas 首帧不是“空的”
+      // A：先 seek 再 play，再等一帧，确保 Canvas 首帧不是"空的"
       await seekAndPark(videoA, loopStart);
       await safePlay(videoA);
       await waitForFrame(videoA);
@@ -560,6 +663,11 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
     return 'text-red-500';
   };
 
+  const formatTime = (ms: number) => {
+    const s = (ms / 1000).toFixed(2);
+    return `${s}s`;
+  };
+
   return (
     <div className="relative w-full h-full flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-secondary/5 rounded-xl overflow-hidden">
       <input
@@ -612,8 +720,101 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         </div>
       )}
 
+      {/* 诊断面板 */}
+      {showDiagnostics && diagnostics && (
+        <div className="absolute top-2 left-2 right-2 bg-black/80 text-white text-xs font-mono p-3 rounded-lg space-y-2 max-h-[60%] overflow-hidden flex flex-col">
+          <div className="flex items-center justify-between">
+            <span className="text-green-400 font-bold">🔧 闪动诊断面板</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-5 px-2 text-xs text-red-400 hover:text-red-300"
+              onClick={clearDrawFailLogs}
+            >
+              <Trash2 className="h-3 w-3 mr-1" />
+              清空日志
+            </Button>
+          </div>
+          
+          {/* 实时状态 */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            <div>
+              <span className="text-gray-400">活动视频:</span>
+              <span className={`ml-1 font-bold ${diagnostics.activeVideo === 'A' ? 'text-blue-400' : 'text-orange-400'}`}>
+                {diagnostics.activeVideo}
+              </span>
+            </div>
+            <div>
+              <span className="text-gray-400">Crossfade:</span>
+              <span className={`ml-1 ${diagnostics.crossfade > 0 ? 'text-yellow-400' : 'text-gray-500'}`}>
+                {(diagnostics.crossfade * 100).toFixed(1)}%
+              </span>
+            </div>
+            <div>
+              <span className="text-gray-400">loopStart:</span>
+              <span className="ml-1">{diagnostics.loopStart.toFixed(3)}s</span>
+            </div>
+            <div>
+              <span className="text-gray-400">loopEnd:</span>
+              <span className="ml-1">{diagnostics.loopEnd.toFixed(3)}s</span>
+            </div>
+            <div className="col-span-2">
+              <span className="text-gray-400">剩余时间:</span>
+              <span className={`ml-1 ${diagnostics.remaining < 0.2 ? 'text-red-400 font-bold' : ''}`}>
+                {diagnostics.remaining.toFixed(3)}s
+              </span>
+            </div>
+          </div>
+
+          {/* A/B 视频状态 */}
+          <div className="grid grid-cols-2 gap-2 pt-1 border-t border-gray-700">
+            <div className="space-y-0.5">
+              <div className="text-blue-400 font-bold">Video A</div>
+              <div>readyState: <span className={diagnostics.videoA.readyState >= 2 ? 'text-green-400' : 'text-red-400'}>{diagnostics.videoA.readyState}</span></div>
+              <div>seeking: <span className={diagnostics.videoA.seeking ? 'text-red-400' : 'text-green-400'}>{String(diagnostics.videoA.seeking)}</span></div>
+              <div>currentTime: {diagnostics.videoA.currentTime.toFixed(3)}s</div>
+              <div>paused: <span className={diagnostics.videoA.paused ? 'text-yellow-400' : 'text-green-400'}>{String(diagnostics.videoA.paused)}</span></div>
+            </div>
+            <div className="space-y-0.5">
+              <div className="text-orange-400 font-bold">Video B</div>
+              <div>readyState: <span className={diagnostics.videoB.readyState >= 2 ? 'text-green-400' : 'text-red-400'}>{diagnostics.videoB.readyState}</span></div>
+              <div>seeking: <span className={diagnostics.videoB.seeking ? 'text-red-400' : 'text-green-400'}>{String(diagnostics.videoB.seeking)}</span></div>
+              <div>currentTime: {diagnostics.videoB.currentTime.toFixed(3)}s</div>
+              <div>paused: <span className={diagnostics.videoB.paused ? 'text-yellow-400' : 'text-green-400'}>{String(diagnostics.videoB.paused)}</span></div>
+            </div>
+          </div>
+
+          {/* Draw 失败日志 */}
+          {drawFailLogs.length > 0 && (
+            <div className="pt-1 border-t border-gray-700 flex-1 min-h-0">
+              <div className="text-red-400 font-bold mb-1">⚠️ Draw 失败日志 ({drawFailLogs.length})</div>
+              <ScrollArea className="h-24">
+                <div className="space-y-0.5">
+                  {drawFailLogs.slice(-10).reverse().map((log, i) => (
+                    <div key={i} className="text-[10px] text-red-300">
+                      [{formatTime(log.time)}] <span className={log.video === 'A' ? 'text-blue-300' : 'text-orange-300'}>{log.video}</span>: {log.reason}
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Controls */}
       <div className="absolute bottom-4 right-4 flex gap-2">
+        {/* 诊断按钮 */}
+        <Button
+          variant={showDiagnostics ? "default" : "secondary"}
+          size="icon"
+          className={`h-8 w-8 ${showDiagnostics ? 'bg-red-500 hover:bg-red-600' : 'bg-background/80 backdrop-blur-sm hover:bg-background/90'}`}
+          onClick={() => setShowDiagnostics(!showDiagnostics)}
+          title="闪动诊断面板"
+        >
+          <Bug className="h-4 w-4" />
+        </Button>
+
         <Popover open={showSettings} onOpenChange={setShowSettings}>
           <PopoverTrigger asChild>
             <Button
