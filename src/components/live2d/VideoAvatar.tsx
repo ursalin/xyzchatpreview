@@ -284,7 +284,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         className="absolute inset-0 w-full h-full object-contain"
         style={{
           filter: isSpeaking ? 'brightness(1.05)' : 'brightness(1)',
-          transition: 'filter 0.3s ease',
+          transition: 'opacity 140ms linear, filter 0.3s ease',
           opacity: activeVideo === 'A' ? 1 : 0,
           pointerEvents: activeVideo === 'A' ? 'auto' : 'none',
         }}
@@ -299,7 +299,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         className="absolute inset-0 w-full h-full object-contain"
         style={{
           filter: isSpeaking ? 'brightness(1.05)' : 'brightness(1)',
-          transition: 'filter 0.3s ease',
+          transition: 'opacity 140ms linear, filter 0.3s ease',
           opacity: activeVideo === 'B' ? 1 : 0,
           pointerEvents: activeVideo === 'B' ? 'auto' : 'none',
         }}
