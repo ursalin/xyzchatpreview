@@ -330,17 +330,32 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
     };
 
     const primeVideo = async (v: HTMLVideoElement, startTime: number) => {
+      // 让“隐藏视频”提前跑起来，避免切换时黑帧/闪烁
       try {
-        v.pause();
         v.currentTime = startTime;
       } catch {
         // ignore
       }
 
-      v.load();
       await safePlay(v);
       await waitNextFrame(v);
-      v.pause();
+    };
+
+    const resetHiddenToLoopStart = async (v: HTMLVideoElement, loopStart: number) => {
+      // 隐藏态重置：pause -> seek -> play（不再 load，避免 poster/黑帧闪一下）
+      try {
+        v.pause();
+      } catch {
+        // ignore
+      }
+
+      try {
+        v.currentTime = loopStart;
+      } catch {
+        // ignore
+      }
+
+      await safePlay(v);
     };
 
     const switchTo = async (nextKey: 'A' | 'B', loopStart: number) => {
@@ -351,19 +366,17 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
 
       switchingRef.current = true;
       try {
+        // 确保 nextVideo 已经在播放并产生过至少一帧
         await safePlay(nextVideo);
         await waitFreshPresentedFrame(nextVideo, FRESH_FRAME_TIMEOUT_MS);
 
         activeVideoRef.current = nextKey;
         setActiveVideo(nextKey);
 
-        currentVideo.pause();
-        try {
-          currentVideo.currentTime = loopStart;
-        } catch {
-          // ignore
-        }
-        currentVideo.load();
+        // 等 UI 完成 opacity 切换后，再重置旧视频（避免同一帧内被操作导致闪烁）
+        requestAnimationFrame(() => {
+          void resetHiddenToLoopStart(currentVideo, loopStart);
+        });
 
         armedRef.current = false;
       } finally {
@@ -385,20 +398,15 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         const { loopStart, loopEnd } = getLoopBounds(d);
         const remaining = loopEnd - current.currentTime;
 
-        // 提前预热下一段
+        // 提前预热下一段（让隐藏视频跑起来）
         if (!armedRef.current && remaining <= ARM_THRESHOLD_S && remaining > SWITCH_THRESHOLD_S) {
           armedRef.current = true;
           void primeVideo(inactive, loopStart);
         }
 
-        // 临近结尾：瞬时切换
-        if (remaining <= SWITCH_THRESHOLD_S && remaining > 0) {
+        // 临近结尾：切换到另一路（不再对“可见视频”做跳回 seek，避免闪一下）
+        if (remaining <= SWITCH_THRESHOLD_S) {
           void switchTo(activeVideoRef.current === 'A' ? 'B' : 'A', loopStart);
-        }
-
-        // 如果超过 loopEnd（极端情况），立即跳回
-        if (current.currentTime >= loopEnd) {
-          current.currentTime = loopStart;
         }
       }
 
