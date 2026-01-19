@@ -91,7 +91,7 @@ const captureFrame = (
   });
 };
 
-// 分析视频首尾帧差异
+// 分析视频首尾帧差异（两阶段：粗扫描 + 密集精确扫描）
 const analyzeVideoFrames = async (
   videoSrc: string,
   onProgress: (percent: number) => void
@@ -113,75 +113,120 @@ const analyzeVideoFrames = async (
     
     video.onloadedmetadata = async () => {
       const duration = video.duration;
-      const width = Math.min(video.videoWidth, 320);  // 降低分辨率提高性能
+      const width = Math.min(video.videoWidth, 320);
       const height = Math.min(video.videoHeight, 180);
       canvas.width = width;
       canvas.height = height;
       
-      // 采样点数量
-      const sampleCount = 10;
+      // === 第一阶段：粗扫描（找候选区域）===
+      const coarseSampleCount = 10;
       const startFrames: FrameAnalysis[] = [];
       const endFrames: FrameAnalysis[] = [];
       
       try {
-        // 捕获第一帧（作为参考）
-        onProgress(5);
+        // 捕获参考帧
+        onProgress(2);
         const firstFrame = await captureFrame(video, canvas, ctx, 0.1);
-        
-        // 捕获最后一帧（作为参考）
-        onProgress(10);
+        onProgress(4);
         const lastFrame = await captureFrame(video, canvas, ctx, duration - 0.1);
         
-        // 分析开头区域（0-30%）
-        for (let i = 0; i <= sampleCount; i++) {
-          const percent = (i / sampleCount) * 30;
+        // 粗扫描开头区域（0-30%）
+        for (let i = 0; i <= coarseSampleCount; i++) {
+          const percent = (i / coarseSampleCount) * 30;
           const time = (percent / 100) * duration;
           const frame = await captureFrame(video, canvas, ctx, time);
           const diffWithLast = calculateFrameDiff(ctx, width, height, frame, lastFrame);
-          
-          startFrames.push({
-            position: percent,
-            diffScore: diffWithLast
-          });
-          
-          onProgress(10 + (i / sampleCount) * 40);
+          startFrames.push({ position: percent, diffScore: diffWithLast });
+          onProgress(4 + (i / coarseSampleCount) * 18);
         }
         
-        // 分析结尾区域（70-100%）
-        for (let i = 0; i <= sampleCount; i++) {
-          const percent = 70 + (i / sampleCount) * 30;
+        // 粗扫描结尾区域（70-100%）
+        for (let i = 0; i <= coarseSampleCount; i++) {
+          const percent = 70 + (i / coarseSampleCount) * 30;
           const time = (percent / 100) * duration;
           const frame = await captureFrame(video, canvas, ctx, time);
           const diffWithFirst = calculateFrameDiff(ctx, width, height, frame, firstFrame);
-          
-          endFrames.push({
-            position: 100 - percent,  // 转换为"从结尾裁剪"的百分比
-            diffScore: diffWithFirst
-          });
-          
-          onProgress(50 + (i / sampleCount) * 45);
+          endFrames.push({ position: 100 - percent, diffScore: diffWithFirst });
+          onProgress(22 + (i / coarseSampleCount) * 18);
         }
         
-        // 找到最佳裁剪点（差异最小的位置）
-        const bestStart = startFrames.reduce((best, curr) => 
+        // 找粗扫描最佳候选
+        const coarseBestStart = startFrames.reduce((best, curr) => 
+          curr.diffScore < best.diffScore ? curr : best
+        );
+        const coarseBestEnd = endFrames.reduce((best, curr) => 
           curr.diffScore < best.diffScore ? curr : best
         );
         
-        const bestEnd = endFrames.reduce((best, curr) => 
+        // === 第二阶段：密集精确扫描（±1%范围，0.05%步长）===
+        const fineStep = 0.05; // 0.05% 步长
+        const fineRange = 1.0; // ±1% 范围
+        
+        // 密集扫描开头区域
+        const fineStartFrames: FrameAnalysis[] = [];
+        const fineStartMin = Math.max(0, coarseBestStart.position - fineRange);
+        const fineStartMax = Math.min(30, coarseBestStart.position + fineRange);
+        const fineStartCount = Math.ceil((fineStartMax - fineStartMin) / fineStep);
+        
+        for (let i = 0; i <= fineStartCount; i++) {
+          const percent = fineStartMin + (i * fineStep);
+          if (percent > fineStartMax) break;
+          const time = (percent / 100) * duration;
+          const frame = await captureFrame(video, canvas, ctx, time);
+          const diffWithLast = calculateFrameDiff(ctx, width, height, frame, lastFrame);
+          fineStartFrames.push({ position: percent, diffScore: diffWithLast });
+          onProgress(40 + (i / fineStartCount) * 25);
+        }
+        
+        // 密集扫描结尾区域
+        const fineEndFrames: FrameAnalysis[] = [];
+        const actualEndPercent = 100 - coarseBestEnd.position; // 转回实际位置
+        const fineEndMin = Math.max(70, actualEndPercent - fineRange);
+        const fineEndMax = Math.min(100, actualEndPercent + fineRange);
+        const fineEndCount = Math.ceil((fineEndMax - fineEndMin) / fineStep);
+        
+        for (let i = 0; i <= fineEndCount; i++) {
+          const percent = fineEndMin + (i * fineStep);
+          if (percent > fineEndMax) break;
+          const time = (percent / 100) * duration;
+          const frame = await captureFrame(video, canvas, ctx, time);
+          const diffWithFirst = calculateFrameDiff(ctx, width, height, frame, firstFrame);
+          fineEndFrames.push({ position: 100 - percent, diffScore: diffWithFirst });
+          onProgress(65 + (i / fineEndCount) * 30);
+        }
+        
+        // 合并精细结果到总列表
+        fineStartFrames.forEach(f => {
+          if (!startFrames.some(s => Math.abs(s.position - f.position) < 0.01)) {
+            startFrames.push(f);
+          }
+        });
+        fineEndFrames.forEach(f => {
+          if (!endFrames.some(e => Math.abs(e.position - f.position) < 0.01)) {
+            endFrames.push(f);
+          }
+        });
+        
+        // 从精细扫描中找最佳点（保留小数）
+        const fineBestStart = fineStartFrames.reduce((best, curr) => 
+          curr.diffScore < best.diffScore ? curr : best
+        );
+        const fineBestEnd = fineEndFrames.reduce((best, curr) => 
           curr.diffScore < best.diffScore ? curr : best
         );
         
-        // 计算置信度（基于最小差异值）
-        const avgMinDiff = (bestStart.diffScore + bestEnd.diffScore) / 2;
+        // 计算置信度
+        const avgMinDiff = (fineBestStart.diffScore + fineBestEnd.diffScore) / 2;
         const confidence = Math.max(0, Math.min(100, 100 - avgMinDiff * 5));
         
         onProgress(100);
         
+        // 保留两位小数
         resolve({
-          bestStartPercent: Math.round(bestStart.position),
-          bestEndPercent: Math.round(bestEnd.position),
-          startFrames,
-          endFrames,
+          bestStartPercent: Math.round(fineBestStart.position * 100) / 100,
+          bestEndPercent: Math.round(fineBestEnd.position * 100) / 100,
+          startFrames: startFrames.sort((a, b) => a.position - b.position),
+          endFrames: endFrames.sort((a, b) => a.position - b.position),
           confidence
         });
         
