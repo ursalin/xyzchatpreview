@@ -298,6 +298,45 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
     let destroyed = false;
     let rafId: number | null = null;
     let switching = false;
+    let hasDrawnOnce = false;
+
+    const waitForEvent = (el: EventTarget, event: string, timeoutMs = 2000) => {
+      return new Promise<void>((resolve) => {
+        let done = false;
+        const onDone = () => {
+          if (done) return;
+          done = true;
+          el.removeEventListener(event, onDone as EventListener);
+          resolve();
+        };
+        el.addEventListener(event, onDone as EventListener, { once: true });
+        window.setTimeout(onDone, timeoutMs);
+      });
+    };
+
+    const waitForFrame = (v: HTMLVideoElement) => {
+      const anyV = v as unknown as {
+        requestVideoFrameCallback?: (cb: (now: number, meta: { mediaTime: number }) => void) => number;
+      };
+
+      if (typeof anyV.requestVideoFrameCallback === 'function') {
+        return new Promise<void>((resolve) => {
+          anyV.requestVideoFrameCallback?.(() => resolve());
+        });
+      }
+
+      // rVFC 不可用时的保底：给解码器一点时间
+      return new Promise<void>((resolve) => window.setTimeout(resolve, 34));
+    };
+
+    const waitUntilDrawable = async (v: HTMLVideoElement) => {
+      if (v.readyState < 2) {
+        await waitForEvent(v, 'loadeddata', 2500);
+      }
+      if (v.seeking) {
+        await waitForEvent(v, 'seeked', 2500);
+      }
+    };
 
     const getLoopBounds = (duration: number) => {
       const cfg = configRef.current;
@@ -325,46 +364,57 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
           v.pause();
           v.currentTime = time;
         } catch {
+          v.removeEventListener('seeked', onSeeked);
           resolve();
         }
       });
+    };
+
+    const drawVideo = (v: HTMLVideoElement) => {
+      // 关键：不要 clearRect。否则 drawImage 失败/解码空窗时会直接“黑一下”。
+      if (v.readyState < 2 || v.seeking) return false;
+      try {
+        ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+        hasDrawnOnce = true;
+        return true;
+      } catch {
+        return false;
+      }
     };
 
     // 渲染单帧到 Canvas（可选混合两个视频）
     const renderFrame = () => {
       if (destroyed) return;
 
-      const w = canvas.width;
-      const h = canvas.height;
       const cf = crossfadeRef.current;
 
-      ctx.clearRect(0, 0, w, h);
-
-      // 如果正在 crossfade，绘制两个视频并混合
       if (cf > 0 && cf < 1) {
-        // 先绘制 A (底层)
-        ctx.globalAlpha = 1 - cf;
-        try {
-          ctx.drawImage(videoA, 0, 0, w, h);
-        } catch {
-          // ignore decode errors
+        // A/B 混合：只绘制“可画”的那一方；两者都不可画则保留上一帧
+        const canA = videoA.readyState >= 2 && !videoA.seeking;
+        const canB = videoB.readyState >= 2 && !videoB.seeking;
+
+        if (!canA && !canB) return;
+
+        if (canA && canB) {
+          ctx.globalAlpha = 1 - cf;
+          drawVideo(videoA);
+          ctx.globalAlpha = cf;
+          drawVideo(videoB);
+          ctx.globalAlpha = 1;
+          return;
         }
-        // 再绘制 B (叠加)
-        ctx.globalAlpha = cf;
-        try {
-          ctx.drawImage(videoB, 0, 0, w, h);
-        } catch {
-          // ignore
-        }
+
+        // 只剩一边可画时直接全量绘制，避免 alpha 清空导致闪
         ctx.globalAlpha = 1;
-      } else {
-        // 单视频绘制
-        const activeV = activeVideoRef.current === 'A' ? videoA : videoB;
-        try {
-          ctx.drawImage(activeV, 0, 0, w, h);
-        } catch {
-          // ignore
-        }
+        if (canA) drawVideo(videoA);
+        else if (canB) drawVideo(videoB);
+        return;
+      }
+
+      const activeV = activeVideoRef.current === 'A' ? videoA : videoB;
+      const ok = drawVideo(activeV);
+      if (!ok && !hasDrawnOnce) {
+        // 首帧还没拿到：让 poster 继续盖住
       }
     };
 
@@ -385,10 +435,14 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         if (!switching && remaining <= crossfadeS && remaining > 0) {
           switching = true;
 
-          // 确保 nextVideo 从 loopStart 开始播放
           (async () => {
+            // 1) 先把 nextVideo seek 到 loopStart
             await seekAndPark(nextVideo, loopStart);
+            await waitUntilDrawable(nextVideo);
+
+            // 2) 播放并等待至少一帧解码到位，再启动 crossfade（否则第一帧可能是黑/旧帧）
             await safePlay(nextVideo);
+            await waitForFrame(nextVideo);
 
             const startTime = performance.now();
             const duration = configRef.current.crossfadeMs;
@@ -407,11 +461,11 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
                 // crossfade 完成
                 crossfadeRef.current = 0;
                 activeVideoRef.current = activeVideoRef.current === 'A' ? 'B' : 'A';
-                
-                // 停止并重置旧视频
+
+                // 停止并预置旧视频到 loopStart（异步，不阻塞渲染）
                 const oldVideo = activeVideoRef.current === 'A' ? videoB : videoA;
                 oldVideo.pause();
-                oldVideo.currentTime = loopStart;
+                void seekAndPark(oldVideo, loopStart);
 
                 switching = false;
               }
@@ -442,18 +496,21 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       const d = videoA.duration;
       const { loopStart } = Number.isFinite(d) ? getLoopBounds(d) : { loopStart: 0 };
 
-      videoA.currentTime = loopStart;
+      // A：先 seek 再 play，再等一帧，确保 Canvas 首帧不是“空的”
+      await seekAndPark(videoA, loopStart);
       await safePlay(videoA);
+      await waitForFrame(videoA);
 
-      // 预加载 B
+      // 预置 B 到 loopStart（保持暂停即可）
       if (Number.isFinite(d)) {
         await seekAndPark(videoB, loopStart);
       }
 
+      // 先画一帧再切走 poster
+      renderFrame();
       setIsLoaded(true);
       onImageLoaded?.();
 
-      // 开始渲染循环
       loop();
     };
 
