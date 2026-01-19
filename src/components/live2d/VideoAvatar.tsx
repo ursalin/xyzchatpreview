@@ -273,6 +273,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
 
     let rafId: number | null = null;
     let destroyed = false;
+    let resetTimeoutId: number | null = null;
 
     const armedRef = { current: false };
 
@@ -373,10 +374,14 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         activeVideoRef.current = nextKey;
         setActiveVideo(nextKey);
 
-        // 等 UI 完成 opacity 切换后，再重置旧视频（避免同一帧内被操作导致闪烁）
-        requestAnimationFrame(() => {
+        // 重要：等淡出完成后再去 pause/seek 旧视频。
+        // 否则旧视频在 opacity 仍 > 0 时被 seek，会在画面上“闪一下”。
+        if (resetTimeoutId) window.clearTimeout(resetTimeoutId);
+        const delayMs = Math.max(0, configRef.current.crossfadeMs) + 34;
+        resetTimeoutId = window.setTimeout(() => {
+          if (destroyed) return;
           void resetHiddenToLoopStart(currentVideo, loopStart);
-        });
+        }, delayMs);
 
         armedRef.current = false;
       } finally {
@@ -470,12 +475,13 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
 
     void monitor();
 
-    return () => {
-      destroyed = true;
-      if (rafId) cancelAnimationFrame(rafId);
-      videoA.removeEventListener('ended', onEndedA);
-      videoB.removeEventListener('ended', onEndedB);
-    };
+     return () => {
+       destroyed = true;
+       if (rafId) cancelAnimationFrame(rafId);
+       if (resetTimeoutId) window.clearTimeout(resetTimeoutId);
+       videoA.removeEventListener('ended', onEndedA);
+       videoB.removeEventListener('ended', onEndedB);
+     };
   }, []);
 
   useEffect(() => {
