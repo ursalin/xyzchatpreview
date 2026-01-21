@@ -1,9 +1,10 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { ChatContainer } from '@/components/chat/ChatContainer';
 import Live2DPanel from '@/components/live2d/Live2DPanel';
 import { useSettings } from '@/hooks/useSettings';
 import { Button } from '@/components/ui/button';
-import { PanelLeftClose, PanelLeft } from 'lucide-react';
+import { PanelLeftClose, PanelLeft, Video } from 'lucide-react';
 
 const Index = () => {
   const { settings } = useSettings();
@@ -22,15 +23,26 @@ const Index = () => {
       
       {/* Chat Panel */}
       <div className={`flex-1 flex flex-col relative ${showAvatar ? '' : 'max-w-4xl mx-auto w-full'}`}>
-        {/* Toggle Avatar Button (Desktop) */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="absolute top-3 left-3 z-50 hidden md:flex"
-          onClick={() => setShowAvatar(!showAvatar)}
-        >
-          {showAvatar ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeft className="w-4 h-4" />}
-        </Button>
+        {/* Top Controls */}
+        <div className="absolute top-3 left-3 z-50 flex items-center gap-2">
+          {/* Toggle Avatar Button (Desktop) */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="hidden md:flex"
+            onClick={() => setShowAvatar(!showAvatar)}
+          >
+            {showAvatar ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeft className="w-4 h-4" />}
+          </Button>
+          
+          {/* Video Call Button */}
+          <Link to="/video-call">
+            <Button variant="outline" size="sm" className="gap-2">
+              <Video className="w-4 h-4" />
+              <span className="hidden sm:inline">视频通话</span>
+            </Button>
+          </Link>
+        </div>
         
         <ChatContainer 
           onSpeakingChange={setIsSpeaking}
