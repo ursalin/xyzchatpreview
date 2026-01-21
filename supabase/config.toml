@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.minimax-tts]
 verify_jwt = false
+
+[functions.omnihuman-lipsync]
+verify_jwt = false
