@@ -256,11 +256,29 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     });
   }, []);
 
-  // 获取角色图片的公开 URL
-  const getCharacterImageUrl = useCallback((): string => {
-    // 将本地图片转换为完整 URL
-    const baseUrl = window.location.origin;
-    return `${baseUrl}${characterFrontImg}`;
+  // 将角色图片转换为 base64 data URL (fal.ai 可以直接使用)
+  const getCharacterImageDataUrl = useCallback(async (): Promise<string> => {
+    try {
+      // Fetch the image and convert to base64
+      const response = await fetch(characterFrontImg);
+      const blob = await response.blob();
+      
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const dataUrl = reader.result as string;
+          console.log('Character image converted to data URL, length:', dataUrl.length);
+          resolve(dataUrl);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } catch (error) {
+      console.error('Failed to convert image to data URL:', error);
+      // Fallback to the original URL
+      const baseUrl = window.location.origin;
+      return `${baseUrl}${characterFrontImg}`;
+    }
   }, []);
 
   // 检查缓存中是否有视频
@@ -300,8 +318,8 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
       setIsGeneratingLipsync(true);
       console.log('Generating lipsync video...');
       
-      const imageUrl = getCharacterImageUrl();
-      console.log('Character image URL:', imageUrl);
+      const imageUrl = await getCharacterImageDataUrl();
+      console.log('Character image data URL length:', imageUrl.length);
 
       const { data, error } = await supabase.functions.invoke('omnihuman-lipsync', {
         body: {
@@ -336,7 +354,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     } finally {
       setIsGeneratingLipsync(false);
     }
-  }, [getCharacterImageUrl, cacheVideo]);
+  }, [getCharacterImageDataUrl, cacheVideo]);
 
   // 同步播放音频和视频
   const playSynced = useCallback(async (audioBase64: string, videoUrl: string) => {

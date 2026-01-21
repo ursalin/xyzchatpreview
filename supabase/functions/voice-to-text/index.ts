@@ -72,8 +72,8 @@ serve(async (req) => {
       audioBase64 += btoa(binary);
     }
 
-    // Use Lovable AI Gateway with Gemini for audio transcription
-    const response = await fetch("https://api.lovable.dev/v1/chat/completions", {
+    // Use the correct Lovable AI Gateway URL
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${LOVABLE_API_KEY}`,
@@ -87,7 +87,7 @@ serve(async (req) => {
             content: [
               {
                 type: "text",
-                text: "Please transcribe the following audio recording. Only output the transcribed text, nothing else. If you cannot understand the audio or it's empty, just respond with an empty string."
+                text: "Please transcribe the following audio recording. Only output the transcribed text in the original language, nothing else. If you cannot understand the audio or it's empty, just respond with an empty string."
               },
               {
                 type: "image_url",

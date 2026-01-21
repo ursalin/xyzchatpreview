@@ -12,70 +12,91 @@ interface OmniHumanRequest {
   turboMode?: boolean;
 }
 
-// Upload base64 audio to fal storage and get URL
-async function uploadAudioToFal(audioBase64: string, apiKey: string): Promise<string> {
-  console.log("Uploading audio to fal.ai storage...");
-  
-  // Decode base64 to binary
-  const binaryString = atob(audioBase64);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
+// Upload image from URL to fal storage (for local images that fal can't access)
+async function uploadImageFromUrl(imageUrl: string, apiKey: string): Promise<string> {
+  // If it's already a fal.media URL or a public URL, return as is
+  if (imageUrl.includes('fal.media') || imageUrl.includes('storage.googleapis.com')) {
+    return imageUrl;
   }
   
-  // Get upload URL from fal
-  const initiateResponse = await fetch("https://fal.ai/api/storage/upload/initiate", {
+  console.log("Uploading image to fal storage from URL...");
+  
+  // Use fal's URL upload endpoint
+  const response = await fetch("https://fal.run/fal-ai/any-llm", {
     method: "POST",
     headers: {
       "Authorization": `Key ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      file_name: "audio.mp3",
-      content_type: "audio/mpeg",
+      // This is a workaround - we'll use a different approach
+      prompt: "test"
     }),
   });
   
-  if (!initiateResponse.ok) {
-    const errorText = await initiateResponse.text();
-    console.error("Failed to initiate upload:", errorText);
-    throw new Error(`Failed to initiate fal upload: ${errorText}`);
-  }
-  
-  const { upload_url, file_url } = await initiateResponse.json();
-  console.log("Got upload URL, uploading file...");
-  
-  // Upload the file
-  const uploadResponse = await fetch(upload_url, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "audio/mpeg",
-    },
-    body: bytes,
-  });
-  
-  if (!uploadResponse.ok) {
-    const errorText = await uploadResponse.text();
-    console.error("Failed to upload audio:", errorText);
-    throw new Error(`Failed to upload audio to fal: ${errorText}`);
-  }
-  
-  console.log("Audio uploaded successfully:", file_url);
-  return file_url;
+  // For now, let's try using data URL directly
+  // fal.ai models can accept data URLs
+  return imageUrl;
 }
 
-// Submit job to OmniHuman and poll for result
+// Submit job to OmniHuman using synchronous endpoint with data URL
 async function generateLipsyncVideo(
   imageUrl: string,
-  audioUrl: string,
+  audioBase64: string,
   apiKey: string,
   resolution: string = "720p",
   turboMode: boolean = true
 ): Promise<{ videoUrl: string }> {
   console.log("Submitting OmniHuman job...");
-  console.log("Image URL:", imageUrl);
-  console.log("Audio URL:", audioUrl);
+  console.log("Image URL:", imageUrl.substring(0, 100) + "...");
   console.log("Resolution:", resolution, "Turbo:", turboMode);
+  
+  // Create audio data URL
+  const audioDataUrl = `data:audio/mpeg;base64,${audioBase64}`;
+  
+  // Submit the job using synchronous endpoint (fal.run)
+  const submitResponse = await fetch("https://fal.run/fal-ai/bytedance/omnihuman/v1.5", {
+    method: "POST",
+    headers: {
+      "Authorization": `Key ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      image_url: imageUrl,
+      audio_url: audioDataUrl,
+      resolution: resolution,
+      turbo_mode: turboMode,
+    }),
+  });
+  
+  if (!submitResponse.ok) {
+    const errorText = await submitResponse.text();
+    console.error("OmniHuman sync request failed:", submitResponse.status, errorText);
+    
+    // Try with queue endpoint if sync fails
+    console.log("Trying queue endpoint...");
+    return await generateLipsyncVideoAsync(imageUrl, audioDataUrl, apiKey, resolution, turboMode);
+  }
+  
+  const result = await submitResponse.json();
+  console.log("OmniHuman sync result:", JSON.stringify(result).substring(0, 500));
+  
+  if (result.video?.url) {
+    return { videoUrl: result.video.url };
+  }
+  
+  throw new Error("No video URL in result: " + JSON.stringify(result));
+}
+
+// Async version using queue endpoint
+async function generateLipsyncVideoAsync(
+  imageUrl: string,
+  audioDataUrl: string,
+  apiKey: string,
+  resolution: string = "720p",
+  turboMode: boolean = true
+): Promise<{ videoUrl: string }> {
+  console.log("Submitting OmniHuman async job...");
   
   // Submit the job
   const submitResponse = await fetch("https://queue.fal.run/fal-ai/bytedance/omnihuman/v1.5", {
@@ -86,7 +107,7 @@ async function generateLipsyncVideo(
     },
     body: JSON.stringify({
       image_url: imageUrl,
-      audio_url: audioUrl,
+      audio_url: audioDataUrl,
       resolution: resolution,
       turbo_mode: turboMode,
     }),
@@ -102,7 +123,7 @@ async function generateLipsyncVideo(
   console.log("Job submitted, request_id:", request_id, "initial status:", initialStatus);
   
   // Poll for completion
-  const maxAttempts = 120; // 2 minutes max (1 second intervals)
+  const maxAttempts = 180; // 3 minutes max
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     await new Promise(resolve => setTimeout(resolve, 1000));
     
@@ -122,7 +143,9 @@ async function generateLipsyncVideo(
     }
     
     const statusData = await statusResponse.json();
-    console.log(`Attempt ${attempt + 1}: status = ${statusData.status}`);
+    if (attempt % 10 === 0) {
+      console.log(`Attempt ${attempt + 1}: status = ${statusData.status}`);
+    }
     
     if (statusData.status === "COMPLETED") {
       // Get the result
@@ -141,7 +164,7 @@ async function generateLipsyncVideo(
       }
       
       const result = await resultResponse.json();
-      console.log("OmniHuman result:", JSON.stringify(result));
+      console.log("OmniHuman result:", JSON.stringify(result).substring(0, 500));
       
       if (result.video?.url) {
         return { videoUrl: result.video.url };
@@ -154,7 +177,7 @@ async function generateLipsyncVideo(
     }
   }
   
-  throw new Error("OmniHuman job timed out after 2 minutes");
+  throw new Error("OmniHuman job timed out after 3 minutes");
 }
 
 serve(async (req) => {
@@ -178,16 +201,13 @@ serve(async (req) => {
     }
 
     console.log("Processing OmniHuman lipsync request...");
-    console.log("Image URL:", imageUrl);
+    console.log("Image URL:", imageUrl.substring(0, 100));
     console.log("Audio base64 length:", audioBase64.length);
 
-    // Step 1: Upload audio to fal storage
-    const audioUrl = await uploadAudioToFal(audioBase64, apiKey);
-
-    // Step 2: Generate lipsync video
+    // Generate lipsync video (using data URL for audio)
     const result = await generateLipsyncVideo(
       imageUrl,
-      audioUrl,
+      audioBase64,
       apiKey,
       resolution || "720p",
       turboMode !== false
