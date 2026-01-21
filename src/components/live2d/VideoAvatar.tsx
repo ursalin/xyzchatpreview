@@ -11,6 +11,7 @@ import posterImg from '@/assets/character-front.jpg';
 
 interface VideoAvatarProps {
   isSpeaking?: boolean;
+  lipsyncVideoUrl?: string | null;
   onImageLoaded?: () => void;
 }
 
@@ -260,11 +261,13 @@ const analyzeVideoFrames = async (
 
 const VideoAvatar: React.FC<VideoAvatarProps> = ({ 
   isSpeaking = false,
+  lipsyncVideoUrl = null,
   onImageLoaded 
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoARef = useRef<HTMLVideoElement>(null);
   const videoBRef = useRef<HTMLVideoElement>(null);
+  const lipsyncVideoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const configRef = useRef<LoopConfig>(DEFAULT_CONFIG);
   const activeVideoRef = useRef<'A' | 'B'>('A');
@@ -274,6 +277,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
   const [isLoaded, setIsLoaded] = useState(false);
   const [config, setConfig] = useState<LoopConfig>(DEFAULT_CONFIG);
   const [showSettings, setShowSettings] = useState(false);
+  const [isPlayingLipsync, setIsPlayingLipsync] = useState(false);
   
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState(0);
@@ -294,6 +298,20 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       setDrawFailLogs([...drawFailLogsRef.current]);
     }
   }, [showDiagnostics]);
+
+  // 当有新的唇形动画视频时自动播放
+  useEffect(() => {
+    if (lipsyncVideoUrl && lipsyncVideoRef.current) {
+      console.log('Playing lipsync video:', lipsyncVideoUrl);
+      lipsyncVideoRef.current.src = lipsyncVideoUrl;
+      lipsyncVideoRef.current.load();
+      lipsyncVideoRef.current.play().then(() => {
+        setIsPlayingLipsync(true);
+      }).catch(err => {
+        console.error('Failed to play lipsync video:', err);
+      });
+    }
+  }, [lipsyncVideoUrl]);
 
   const src = customVideo || idleVideo;
 
@@ -693,11 +711,24 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         preload="auto"
         className="hidden"
       />
+      
+      {/* 唇形动画视频 - OmniHuman 生成 */}
+      <video
+        ref={lipsyncVideoRef}
+        playsInline
+        onEnded={() => setIsPlayingLipsync(false)}
+        onError={() => setIsPlayingLipsync(false)}
+        className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-300 ${
+          isPlayingLipsync ? 'opacity-100 z-10' : 'opacity-0 pointer-events-none'
+        }`}
+      />
 
-      {/* Canvas 渲染 - 无闪烁 */}
+      {/* Canvas 渲染 - 无闪烁 (当唇形动画播放时隐藏) */}
       <canvas
         ref={canvasRef}
-        className="w-full h-full object-contain"
+        className={`w-full h-full object-contain transition-opacity duration-300 ${
+          isPlayingLipsync ? 'opacity-0' : 'opacity-100'
+        }`}
         style={{
           filter: isSpeaking ? 'brightness(1.05)' : 'brightness(1)',
           transition: 'filter 0.3s ease',
@@ -705,7 +736,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       />
 
       {/* Poster 图片 - 加载时显示 */}
-      {!isLoaded && (
+      {!isLoaded && !isPlayingLipsync && (
         <img
           src={posterImg}
           alt="Loading"

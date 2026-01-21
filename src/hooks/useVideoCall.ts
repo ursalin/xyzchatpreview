@@ -1,19 +1,25 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Message, AppSettings } from '@/types/chat';
+import { supabase } from '@/integrations/supabase/client';
+
+// 角色图片 URL（需要是公开可访问的 URL）
+import characterFrontImg from '@/assets/character-front.jpg';
 
 interface UseVideoCallOptions {
   settings: AppSettings;
   systemPrompt: string;
   onSpeakingChange?: (isSpeaking: boolean) => void;
+  onLipsyncVideoReady?: (videoUrl: string) => void;
 }
 
-export function useVideoCall({ settings, systemPrompt, onSpeakingChange }: UseVideoCallOptions) {
+export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsyncVideoReady }: UseVideoCallOptions) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessingVoice, setIsProcessingVoice] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isGeneratingLipsync, setIsGeneratingLipsync] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -183,7 +189,56 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange }: UseVi
     });
   }, []);
 
-  // TTS 播放
+  // 获取角色图片的公开 URL
+  const getCharacterImageUrl = useCallback((): string => {
+    // 将本地图片转换为完整 URL
+    const baseUrl = window.location.origin;
+    return `${baseUrl}${characterFrontImg}`;
+  }, []);
+
+  // 生成唇形动画视频
+  const generateLipsyncVideo = useCallback(async (audioBase64: string): Promise<string | null> => {
+    try {
+      setIsGeneratingLipsync(true);
+      console.log('Generating lipsync video...');
+      
+      const imageUrl = getCharacterImageUrl();
+      console.log('Character image URL:', imageUrl);
+
+      const { data, error } = await supabase.functions.invoke('omnihuman-lipsync', {
+        body: {
+          imageUrl,
+          audioBase64,
+          resolution: '720p',
+          turboMode: true,
+        },
+      });
+
+      if (error) {
+        console.error('Lipsync function error:', error);
+        return null;
+      }
+
+      if (data?.error) {
+        console.error('Lipsync API error:', data.error);
+        return null;
+      }
+
+      if (data?.videoUrl) {
+        console.log('Lipsync video generated:', data.videoUrl);
+        return data.videoUrl;
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Lipsync generation error:', error);
+      return null;
+    } finally {
+      setIsGeneratingLipsync(false);
+    }
+  }, [getCharacterImageUrl]);
+
+  // TTS 播放（同时触发唇形动画生成）
   const speak = useCallback(async (text: string) => {
     const { voiceConfig } = settings;
     if (!voiceConfig.enabled || !voiceConfig.minimaxApiKey || !voiceConfig.minimaxGroupId) {
@@ -217,6 +272,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange }: UseVi
       const data = await response.json();
       
       if (data.audioContent) {
+        // 同时播放音频和生成唇形动画视频
         const audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
         const audio = new Audio(audioUrl);
         audioRef.current = audio;
@@ -225,12 +281,21 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange }: UseVi
         audio.onended = () => setIsPlaying(false);
         audio.onerror = () => setIsPlaying(false);
         
+        // 先播放音频（立即响应）
         await audio.play();
+
+        // 后台生成唇形动画视频（异步，不阻塞音频播放）
+        // 下次对话时可以使用生成的视频
+        generateLipsyncVideo(data.audioContent).then(videoUrl => {
+          if (videoUrl && onLipsyncVideoReady) {
+            onLipsyncVideoReady(videoUrl);
+          }
+        });
       }
     } catch (error) {
       console.error('TTS error:', error);
     }
-  }, [settings]);
+  }, [settings, generateLipsyncVideo, onLipsyncVideoReady]);
 
   // 停止播放
   const stopPlaying = useCallback(() => {
@@ -384,6 +449,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange }: UseVi
     isRecording,
     isProcessingVoice,
     isPlaying,
+    isGeneratingLipsync,
     startCamera,
     stopCamera,
     captureFrame,

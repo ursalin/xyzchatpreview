@@ -9,13 +9,19 @@ const VideoCall = () => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isInCall, setIsInCall] = useState(false);
   const [showAvatar, setShowAvatar] = useState(true);
+  const [lipsyncVideoUrl, setLipsyncVideoUrl] = useState<string | null>(null);
+  const [isGeneratingLipsync, setIsGeneratingLipsync] = useState(false);
 
   return (
     <div className="h-screen w-full flex bg-background">
       {/* 角色动态影像面板 */}
       {showAvatar && (
         <div className="hidden md:flex w-1/2 lg:w-[45%] p-4 relative">
-          <Live2DPanel isSpeaking={isSpeaking} />
+          <Live2DPanel 
+            isSpeaking={isSpeaking} 
+            lipsyncVideoUrl={lipsyncVideoUrl}
+            isGeneratingLipsync={isGeneratingLipsync}
+          />
         </div>
       )}
       
@@ -55,6 +61,8 @@ const VideoCall = () => {
           <VideoCallPanel 
             onSpeakingChange={setIsSpeaking}
             onCallStateChange={setIsInCall}
+            onLipsyncVideoReady={setLipsyncVideoUrl}
+            onLipsyncGeneratingChange={setIsGeneratingLipsync}
           />
         </div>
       </div>
@@ -62,7 +70,11 @@ const VideoCall = () => {
       {/* 移动端角色显示 */}
       {isInCall && (
         <div className="md:hidden fixed bottom-[200px] right-4 w-32 h-32 rounded-lg overflow-hidden shadow-lg z-50">
-          <Live2DPanel isSpeaking={isSpeaking} />
+          <Live2DPanel 
+            isSpeaking={isSpeaking} 
+            lipsyncVideoUrl={lipsyncVideoUrl}
+            isGeneratingLipsync={isGeneratingLipsync}
+          />
         </div>
       )}
     </div>
