@@ -338,7 +338,28 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     }
   }, [getCharacterImageUrl, cacheVideo]);
 
-  // TTS 播放（同时触发唇形动画生成，支持缓存）
+  // 同步播放音频和视频
+  const playSynced = useCallback(async (audioBase64: string, videoUrl: string) => {
+    const audioUrl = `data:audio/mpeg;base64,${audioBase64}`;
+    const audio = new Audio(audioUrl);
+    audioRef.current = audio;
+    
+    // 先通知视频准备好
+    if (onLipsyncVideoReady) {
+      onLipsyncVideoReady(videoUrl);
+    }
+    
+    // 短暂延迟让视频元素加载
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    audio.onplay = () => setIsPlaying(true);
+    audio.onended = () => setIsPlaying(false);
+    audio.onerror = () => setIsPlaying(false);
+    
+    await audio.play();
+  }, [onLipsyncVideoReady]);
+
+  // TTS 播放（等待视频生成完成后同步播放）
   const speak = useCallback(async (text: string) => {
     const { voiceConfig } = settings;
     if (!voiceConfig.enabled || !voiceConfig.minimaxApiKey || !voiceConfig.minimaxGroupId) {
@@ -349,27 +370,14 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     // 先检查缓存
     const cached = getCachedVideo(text);
     if (cached) {
-      console.log('Using cached lipsync video');
-      
-      // 使用缓存的音频播放
-      const audioUrl = `data:audio/mpeg;base64,${cached.audioBase64}`;
-      const audio = new Audio(audioUrl);
-      audioRef.current = audio;
-      
-      audio.onplay = () => setIsPlaying(true);
-      audio.onended = () => setIsPlaying(false);
-      audio.onerror = () => setIsPlaying(false);
-      
-      await audio.play();
-      
-      // 直接使用缓存的视频
-      if (onLipsyncVideoReady) {
-        onLipsyncVideoReady(cached.videoUrl);
-      }
+      console.log('Using cached lipsync video - playing synced');
+      await playSynced(cached.audioBase64, cached.videoUrl);
       return;
     }
 
     try {
+      // Step 1: 生成 TTS 音频
+      console.log('Generating TTS audio...');
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/minimax-tts`,
         {
@@ -395,30 +403,32 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
       const data = await response.json();
       
       if (data.audioContent) {
-        // 播放音频
-        const audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
-        const audio = new Audio(audioUrl);
-        audioRef.current = audio;
+        // Step 2: 等待视频生成完成
+        console.log('TTS audio ready, generating lipsync video...');
+        const videoUrl = await generateLipsyncVideo(data.audioContent, text);
         
-        audio.onplay = () => setIsPlaying(true);
-        audio.onended = () => setIsPlaying(false);
-        audio.onerror = () => setIsPlaying(false);
-        
-        // 先播放音频（立即响应）
-        await audio.play();
-
-        // 后台生成唇形动画视频（异步，不阻塞音频播放）
-        // 生成后会自动缓存
-        generateLipsyncVideo(data.audioContent, text).then(videoUrl => {
-          if (videoUrl && onLipsyncVideoReady) {
-            onLipsyncVideoReady(videoUrl);
-          }
-        });
+        if (videoUrl) {
+          // Step 3: 视频生成完成，同步播放音频和视频
+          console.log('Video ready, playing synced audio and video');
+          await playSynced(data.audioContent, videoUrl);
+        } else {
+          // 视频生成失败，仅播放音频
+          console.log('Video generation failed, playing audio only');
+          const audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
+          const audio = new Audio(audioUrl);
+          audioRef.current = audio;
+          
+          audio.onplay = () => setIsPlaying(true);
+          audio.onended = () => setIsPlaying(false);
+          audio.onerror = () => setIsPlaying(false);
+          
+          await audio.play();
+        }
       }
     } catch (error) {
       console.error('TTS error:', error);
     }
-  }, [settings, generateLipsyncVideo, onLipsyncVideoReady, getCachedVideo]);
+  }, [settings, generateLipsyncVideo, getCachedVideo, playSynced]);
 
   // 停止播放
   const stopPlaying = useCallback(() => {
