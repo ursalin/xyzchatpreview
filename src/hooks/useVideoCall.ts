@@ -5,6 +5,72 @@ import { supabase } from '@/integrations/supabase/client';
 // 角色图片 URL（需要是公开可访问的 URL）
 import characterFrontImg from '@/assets/character-front.jpg';
 
+// 唇形动画视频缓存（基于文本哈希）
+interface LipsyncCacheEntry {
+  videoUrl: string;
+  audioBase64: string;
+  createdAt: number;
+}
+
+const CACHE_EXPIRY_MS = 60 * 60 * 1000; // 1小时过期
+const CACHE_KEY = 'lipsync_video_cache';
+const MAX_CACHE_ENTRIES = 20;
+
+// 简单的文本哈希函数
+function hashText(text: string): string {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    const char = text.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return hash.toString(36);
+}
+
+// 从 localStorage 加载缓存
+function loadCache(): Map<string, LipsyncCacheEntry> {
+  try {
+    const stored = localStorage.getItem(CACHE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      return new Map(Object.entries(parsed));
+    }
+  } catch (e) {
+    console.error('Failed to load lipsync cache:', e);
+  }
+  return new Map();
+}
+
+// 保存缓存到 localStorage
+function saveCache(cache: Map<string, LipsyncCacheEntry>) {
+  try {
+    const obj: Record<string, LipsyncCacheEntry> = {};
+    cache.forEach((value, key) => {
+      obj[key] = value;
+    });
+    localStorage.setItem(CACHE_KEY, JSON.stringify(obj));
+  } catch (e) {
+    console.error('Failed to save lipsync cache:', e);
+  }
+}
+
+// 清理过期缓存
+function cleanExpiredCache(cache: Map<string, LipsyncCacheEntry>): Map<string, LipsyncCacheEntry> {
+  const now = Date.now();
+  const entries = Array.from(cache.entries());
+  
+  // 过滤掉过期的条目
+  const valid = entries.filter(([, entry]) => now - entry.createdAt < CACHE_EXPIRY_MS);
+  
+  // 如果超过最大数量，删除最旧的
+  if (valid.length > MAX_CACHE_ENTRIES) {
+    valid.sort((a, b) => b[1].createdAt - a[1].createdAt);
+    return new Map(valid.slice(0, MAX_CACHE_ENTRIES));
+  }
+  
+  return new Map(valid);
+}
+
 interface UseVideoCallOptions {
   settings: AppSettings;
   systemPrompt: string;
@@ -27,6 +93,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const lipsyncCacheRef = useRef<Map<string, LipsyncCacheEntry>>(loadCache());
 
   // 通知父组件说话状态变化
   useEffect(() => {
@@ -196,8 +263,39 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     return `${baseUrl}${characterFrontImg}`;
   }, []);
 
+  // 检查缓存中是否有视频
+  const getCachedVideo = useCallback((text: string): LipsyncCacheEntry | null => {
+    const hash = hashText(text);
+    const cache = cleanExpiredCache(lipsyncCacheRef.current);
+    lipsyncCacheRef.current = cache;
+    saveCache(cache);
+    
+    const entry = cache.get(hash);
+    if (entry && Date.now() - entry.createdAt < CACHE_EXPIRY_MS) {
+      console.log('Found cached lipsync video for text hash:', hash);
+      return entry;
+    }
+    return null;
+  }, []);
+
+  // 保存视频到缓存
+  const cacheVideo = useCallback((text: string, videoUrl: string, audioBase64: string) => {
+    const hash = hashText(text);
+    const cache = cleanExpiredCache(lipsyncCacheRef.current);
+    
+    cache.set(hash, {
+      videoUrl,
+      audioBase64,
+      createdAt: Date.now(),
+    });
+    
+    lipsyncCacheRef.current = cache;
+    saveCache(cache);
+    console.log('Cached lipsync video for text hash:', hash);
+  }, []);
+
   // 生成唇形动画视频
-  const generateLipsyncVideo = useCallback(async (audioBase64: string): Promise<string | null> => {
+  const generateLipsyncVideo = useCallback(async (audioBase64: string, text: string): Promise<string | null> => {
     try {
       setIsGeneratingLipsync(true);
       console.log('Generating lipsync video...');
@@ -226,6 +324,8 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
 
       if (data?.videoUrl) {
         console.log('Lipsync video generated:', data.videoUrl);
+        // 保存到缓存
+        cacheVideo(text, data.videoUrl, audioBase64);
         return data.videoUrl;
       }
 
@@ -236,13 +336,36 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     } finally {
       setIsGeneratingLipsync(false);
     }
-  }, [getCharacterImageUrl]);
+  }, [getCharacterImageUrl, cacheVideo]);
 
-  // TTS 播放（同时触发唇形动画生成）
+  // TTS 播放（同时触发唇形动画生成，支持缓存）
   const speak = useCallback(async (text: string) => {
     const { voiceConfig } = settings;
     if (!voiceConfig.enabled || !voiceConfig.minimaxApiKey || !voiceConfig.minimaxGroupId) {
       console.log('Voice not enabled or missing config');
+      return;
+    }
+
+    // 先检查缓存
+    const cached = getCachedVideo(text);
+    if (cached) {
+      console.log('Using cached lipsync video');
+      
+      // 使用缓存的音频播放
+      const audioUrl = `data:audio/mpeg;base64,${cached.audioBase64}`;
+      const audio = new Audio(audioUrl);
+      audioRef.current = audio;
+      
+      audio.onplay = () => setIsPlaying(true);
+      audio.onended = () => setIsPlaying(false);
+      audio.onerror = () => setIsPlaying(false);
+      
+      await audio.play();
+      
+      // 直接使用缓存的视频
+      if (onLipsyncVideoReady) {
+        onLipsyncVideoReady(cached.videoUrl);
+      }
       return;
     }
 
@@ -272,7 +395,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
       const data = await response.json();
       
       if (data.audioContent) {
-        // 同时播放音频和生成唇形动画视频
+        // 播放音频
         const audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
         const audio = new Audio(audioUrl);
         audioRef.current = audio;
@@ -285,8 +408,8 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
         await audio.play();
 
         // 后台生成唇形动画视频（异步，不阻塞音频播放）
-        // 下次对话时可以使用生成的视频
-        generateLipsyncVideo(data.audioContent).then(videoUrl => {
+        // 生成后会自动缓存
+        generateLipsyncVideo(data.audioContent, text).then(videoUrl => {
           if (videoUrl && onLipsyncVideoReady) {
             onLipsyncVideoReady(videoUrl);
           }
@@ -295,7 +418,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     } catch (error) {
       console.error('TTS error:', error);
     }
-  }, [settings, generateLipsyncVideo, onLipsyncVideoReady]);
+  }, [settings, generateLipsyncVideo, onLipsyncVideoReady, getCachedVideo]);
 
   // 停止播放
   const stopPlaying = useCallback(() => {
