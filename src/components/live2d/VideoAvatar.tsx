@@ -275,6 +275,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
 
   const [customVideo, setCustomVideo] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [config, setConfig] = useState<LoopConfig>(DEFAULT_CONFIG);
   const [showSettings, setShowSettings] = useState(false);
   const [isPlayingLipsync, setIsPlayingLipsync] = useState(false);
@@ -603,6 +604,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
 
     // 初始化视频
     const initVideos = () => {
+      setLoadError(null);
       videoA.src = src;
       videoB.src = src;
       videoA.load();
@@ -635,7 +637,15 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       loop();
     };
 
+    const onVideoError = () => {
+      // 关键：不要一直转圈，让用户看到明确的失败状态
+      setLoadError('视频素材加载失败');
+    };
+
+    // 有些浏览器/场景下 canplay 事件可能不稳定，增加 loadeddata 作为兜底
     videoA.addEventListener('canplay', onCanPlayA, { once: true });
+    videoA.addEventListener('loadeddata', onCanPlayA, { once: true });
+    videoA.addEventListener('error', onVideoError);
     initVideos();
 
     return () => {
@@ -643,6 +653,8 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       if (rafId) cancelAnimationFrame(rafId);
       videoA.pause();
       videoB.pause();
+
+      videoA.removeEventListener('error', onVideoError);
     };
   }, [src, onImageLoaded]);
 
@@ -659,6 +671,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       const url = URL.createObjectURL(file);
       setCustomVideo(url);
       setIsLoaded(false);
+      setLoadError(null);
       setAnalysisResult(null);
       setAnalysisApplied(false);
     }
@@ -670,6 +683,7 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
     }
     setCustomVideo(null);
     setIsLoaded(false);
+    setLoadError(null);
     setConfig(DEFAULT_CONFIG);
     setAnalysisResult(null);
     setAnalysisApplied(false);
@@ -745,9 +759,18 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       )}
 
       {/* Loading spinner */}
-      {!isLoaded && (
+      {!isLoaded && !loadError && !isPlayingLipsync && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/50 backdrop-blur-sm">
           <div className="animate-spin rounded-full h-10 w-10 border-2 border-primary border-t-transparent"></div>
+        </div>
+      )}
+
+      {/* Load error (stop infinite spinner) */}
+      {!isLoaded && loadError && (
+        <div className="absolute inset-0 flex items-center justify-center bg-background/50 backdrop-blur-sm">
+          <div className="rounded-lg border border-border bg-background/80 px-4 py-3 text-sm text-foreground shadow-sm">
+            {loadError}
+          </div>
         </div>
       )}
 
