@@ -24,11 +24,15 @@ import { cn } from '@/lib/utils';
 interface VideoCallPanelProps {
   onSpeakingChange?: (isSpeaking: boolean) => void;
   onCallStateChange?: (isInCall: boolean) => void;
+  onLipsyncVideoReady?: (videoUrl: string) => void;
+  onLipsyncGeneratingChange?: (isGenerating: boolean) => void;
 }
 
 const VideoCallPanel: React.FC<VideoCallPanelProps> = ({
   onSpeakingChange,
   onCallStateChange,
+  onLipsyncVideoReady,
+  onLipsyncGeneratingChange,
 }) => {
   const { settings } = useSettings();
   const userVideoRef = useRef<HTMLVideoElement>(null);
@@ -53,6 +57,7 @@ const VideoCallPanel: React.FC<VideoCallPanelProps> = ({
     isRecording,
     isProcessingVoice,
     isPlaying,
+    isGeneratingLipsync,
     startCamera,
     stopCamera,
     startRecording,
@@ -64,7 +69,13 @@ const VideoCallPanel: React.FC<VideoCallPanelProps> = ({
     settings,
     systemPrompt,
     onSpeakingChange,
+    onLipsyncVideoReady,
   });
+
+  // 通知父组件唇形动画生成状态
+  useEffect(() => {
+    onLipsyncGeneratingChange?.(isGeneratingLipsync);
+  }, [isGeneratingLipsync, onLipsyncGeneratingChange]);
 
   // 自动滚动到最新消息
   useEffect(() => {
