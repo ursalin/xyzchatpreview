@@ -2,3 +2,12 @@ project_id = "ylxrtqnlgfzivkmgeqsx"
 
 [functions.chat]
 verify_jwt = false
+
+[functions.vision-chat]
+verify_jwt = false
+
+[functions.voice-to-text]
+verify_jwt = false
+
+[functions.minimax-tts]
+verify_jwt = false
