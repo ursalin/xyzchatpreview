@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Upload, RefreshCw, Settings2, Scan, Loader2, Check, Bug, Trash2 } from 'lucide-react';
+import { Upload, RefreshCw, Settings2, Scan, Loader2, Check, Bug, Trash2, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -291,6 +291,10 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
   const [drawFailLogs, setDrawFailLogs] = useState<DrawFailLog[]>([]);
   const diagnosticsRef = useRef({ enabled: false });
   const drawFailLogsRef = useRef<DrawFailLog[]>([]);
+  
+  // 自动播放被阻止时需要用户交互
+  const [needsUserInteraction, setNeedsUserInteraction] = useState(false);
+  const pendingPlayRef = useRef<(() => Promise<void>) | null>(null);
 
   // 同步诊断面板开关
   useEffect(() => {
@@ -414,11 +418,17 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       return { loopStart, loopEnd: Math.max(loopEnd, loopStart + 0.5) };
     };
 
-    const safePlay = async (v: HTMLVideoElement) => {
+    const safePlay = async (v: HTMLVideoElement): Promise<boolean> => {
       try {
         await v.play();
-      } catch {
-        // ignore
+        return true;
+      } catch (e) {
+        // 检测是否是自动播放被阻止
+        if (e instanceof Error && e.name === 'NotAllowedError') {
+          console.warn('Autoplay blocked, waiting for user interaction');
+          return false;
+        }
+        return true; // 其他错误忽略
       }
     };
 
@@ -614,25 +624,31 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
     // 使用标记确保只初始化一次
     let initialized = false;
     
-    const onCanPlayA = async () => {
-      // 关键：防止 canplay 和 loadeddata 双重触发
-      if (initialized || destroyed) return;
-      initialized = true;
-      
-      // 移除所有监听器，防止重复调用
-      videoA.removeEventListener('canplay', onCanPlayA);
-      videoA.removeEventListener('loadeddata', onCanPlayA);
-      
-      // 设置 Canvas 尺寸
-      canvas.width = videoA.videoWidth || 640;
-      canvas.height = videoA.videoHeight || 480;
-
+    // 完成初始化并启动循环的函数（可能在用户点击后调用）
+    const completeInit = async () => {
       const d = videoA.duration;
       const { loopStart } = Number.isFinite(d) ? getLoopBounds(d) : { loopStart: 0 };
 
-      // A：先 seek 再 play，再等一帧，确保 Canvas 首帧不是"空的"
       await seekAndPark(videoA, loopStart);
-      await safePlay(videoA);
+      const playSuccess = await safePlay(videoA);
+      
+      if (!playSuccess) {
+        // 自动播放被阻止，需要用户交互
+        pendingPlayRef.current = async () => {
+          setNeedsUserInteraction(false);
+          await videoA.play();
+          await waitForFrame(videoA);
+          renderFrame();
+          loop();
+        };
+        setNeedsUserInteraction(true);
+        // 仍然先画一帧静态图
+        renderFrame();
+        setIsLoaded(true);
+        onImageLoaded?.();
+        return;
+      }
+      
       await waitForFrame(videoA);
 
       // 预置 B 到 loopStart（保持暂停即可）
@@ -646,6 +662,22 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       onImageLoaded?.();
 
       loop();
+    };
+    
+    const onCanPlayA = async () => {
+      // 关键：防止 canplay 和 loadeddata 双重触发
+      if (initialized || destroyed) return;
+      initialized = true;
+      
+      // 移除所有监听器，防止重复调用
+      videoA.removeEventListener('canplay', onCanPlayA);
+      videoA.removeEventListener('loadeddata', onCanPlayA);
+      
+      // 设置 Canvas 尺寸
+      canvas.width = videoA.videoWidth || 640;
+      canvas.height = videoA.videoHeight || 480;
+
+      await completeInit();
     };
 
     const onVideoError = () => {
@@ -714,6 +746,18 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
     const s = (ms / 1000).toFixed(2);
     return `${s}s`;
   };
+
+  // 用户点击启动动画
+  const handleStartAnimation = useCallback(async () => {
+    if (pendingPlayRef.current) {
+      try {
+        await pendingPlayRef.current();
+        pendingPlayRef.current = null;
+      } catch (e) {
+        console.error('Failed to start animation:', e);
+      }
+    }
+  }, []);
 
   return (
     <div className="relative w-full h-full flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-secondary/5 rounded-xl overflow-hidden">
@@ -792,6 +836,22 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         <div className="absolute inset-0 flex items-center justify-center bg-background/50 backdrop-blur-sm">
           <div className="rounded-lg border border-border bg-background/80 px-4 py-3 text-sm text-foreground shadow-sm">
             {loadError}
+          </div>
+        </div>
+      )}
+
+      {/* 点击启动动画覆盖层 - 当浏览器阻止自动播放时显示 */}
+      {needsUserInteraction && (
+        <div 
+          className="absolute inset-0 flex items-center justify-center bg-background/60 backdrop-blur-sm cursor-pointer z-20 transition-opacity"
+          onClick={handleStartAnimation}
+        >
+          <div className="flex flex-col items-center gap-3 p-6 rounded-2xl bg-background/90 border border-border shadow-lg">
+            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+              <Play className="w-8 h-8 text-primary fill-primary" />
+            </div>
+            <span className="text-sm font-medium text-foreground">点击启动动画</span>
+            <span className="text-xs text-muted-foreground">浏览器需要用户交互才能播放</span>
           </div>
         </div>
       )}
