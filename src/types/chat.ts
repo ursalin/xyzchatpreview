@@ -27,11 +27,14 @@ export interface ApiConfig {
   model: string;
 }
 
+export type LipsyncEngine = 'omnihuman' | 'musetalk';
+
 export interface VoiceConfig {
   enabled: boolean;
   minimaxApiKey: string;
   minimaxGroupId: string;
   voiceId: string;
+  lipsyncEngine: LipsyncEngine;
 }
 
 export interface AppSettings {
@@ -61,6 +64,7 @@ export const defaultVoiceConfig: VoiceConfig = {
   minimaxApiKey: '',
   minimaxGroupId: '',
   voiceId: 'female-tianmei',
+  lipsyncEngine: 'musetalk',
 };
 
 export const defaultSettings: AppSettings = {

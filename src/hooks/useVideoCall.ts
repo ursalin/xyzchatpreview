@@ -312,37 +312,72 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     console.log('Cached lipsync video for text hash:', hash);
   }, []);
 
-  // 生成唇形动画视频
+  // 生成唇形动画视频 - 支持多引擎
   const generateLipsyncVideo = useCallback(async (audioBase64: string, text: string): Promise<string | null> => {
     try {
       setIsGeneratingLipsync(true);
-      console.log('Generating lipsync video...');
+      const engine = settings.voiceConfig.lipsyncEngine || 'musetalk';
+      console.log(`Generating lipsync video with engine: ${engine}`);
       
       const imageUrl = await getCharacterImageDataUrl();
       console.log('Character image data URL length:', imageUrl.length);
 
-      const { data, error } = await supabase.functions.invoke('omnihuman-lipsync', {
-        body: {
+      // 根据选择的引擎调用不同的 API
+      let functionName: string;
+      let requestBody: Record<string, unknown>;
+
+      if (engine === 'musetalk') {
+        functionName = 'musetalk-lipsync';
+        requestBody = {
+          imageUrl,
+          audioBase64,
+        };
+      } else {
+        functionName = 'omnihuman-lipsync';
+        requestBody = {
           imageUrl,
           audioBase64,
           resolution: '720p',
           turboMode: true,
-        },
+        };
+      }
+
+      console.log(`Calling ${functionName}...`);
+      const { data, error } = await supabase.functions.invoke(functionName, {
+        body: requestBody,
       });
 
       if (error) {
-        console.error('Lipsync function error:', error);
+        console.error(`${engine} function error:`, error);
+        
+        // 如果主引擎失败，尝试备用引擎
+        if (engine === 'musetalk') {
+          console.log('MuseTalk failed, falling back to OmniHuman...');
+          const fallbackResult = await supabase.functions.invoke('omnihuman-lipsync', {
+            body: {
+              imageUrl,
+              audioBase64,
+              resolution: '720p',
+              turboMode: true,
+            },
+          });
+          
+          if (fallbackResult.data?.videoUrl) {
+            console.log('Fallback to OmniHuman succeeded:', fallbackResult.data.videoUrl);
+            cacheVideo(text, fallbackResult.data.videoUrl, audioBase64);
+            return fallbackResult.data.videoUrl;
+          }
+        }
         return null;
       }
 
       if (data?.error) {
-        console.error('Lipsync API error:', data.error);
+        console.error(`${engine} API error:`, data.error);
         return null;
       }
 
       if (data?.videoUrl) {
         console.log('Lipsync video generated:', data.videoUrl);
-        // 保存到缓存
         cacheVideo(text, data.videoUrl, audioBase64);
         return data.videoUrl;
       }
@@ -354,7 +389,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     } finally {
       setIsGeneratingLipsync(false);
     }
-  }, [getCharacterImageDataUrl, cacheVideo]);
+  }, [getCharacterImageDataUrl, cacheVideo, settings.voiceConfig.lipsyncEngine]);
 
   // 同步播放音频和视频
   const playSynced = useCallback(async (audioBase64: string, videoUrl: string) => {

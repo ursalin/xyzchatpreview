@@ -13,8 +13,15 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Settings, User, Key, Type, Volume2 } from 'lucide-react';
-import { AppSettings, defaultSettings, CharacterPreset, ApiConfig, VoiceConfig } from '@/types/chat';
+import { AppSettings, defaultSettings, CharacterPreset, ApiConfig, VoiceConfig, LipsyncEngine } from '@/types/chat';
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -272,6 +279,35 @@ export function SettingsPanel({ settings, onSettingsChange }: SettingsPanelProps
                   />
                   <p className="text-xs text-muted-foreground">
                     可选：female-tianmei, male-qn-qingse, female-shaonv 等
+                  </p>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="lipsyncEngine">口型同步引擎</Label>
+                  <Select
+                    value={localSettings.voiceConfig.lipsyncEngine || 'musetalk'}
+                    onValueChange={(value: LipsyncEngine) => updateVoiceConfig({ lipsyncEngine: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择引擎" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="musetalk">
+                        <div className="flex flex-col">
+                          <span>MuseTalk</span>
+                          <span className="text-xs text-muted-foreground">快速、质量稳定</span>
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="omnihuman">
+                        <div className="flex flex-col">
+                          <span>OmniHuman (ByteDance)</span>
+                          <span className="text-xs text-muted-foreground">高质量、但较慢</span>
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    用于视频通话时的口型同步动画生成
                   </p>
                 </div>
               </>
