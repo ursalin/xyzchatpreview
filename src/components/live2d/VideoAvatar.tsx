@@ -725,25 +725,32 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
         className="hidden"
       />
       
-      {/* 隐藏的双视频元素 - 仅用于解码 */}
+      {/*
+        双视频元素用于解码与读取帧。
+        注意：不能用 `display:none`（Tailwind 的 hidden），部分浏览器（尤其 iOS Safari）会停止加载/解码，导致 Canvas 永远不“动”。
+        这里用“视觉隐藏但仍在布局树中”的方式。
+      */}
       <video
         ref={videoARef}
         muted
         playsInline
         preload="auto"
-        className="hidden"
+        className="absolute w-px h-px opacity-0 pointer-events-none -z-10"
+        aria-hidden="true"
       />
       <video
         ref={videoBRef}
         muted
         playsInline
         preload="auto"
-        className="hidden"
+        className="absolute w-px h-px opacity-0 pointer-events-none -z-10"
+        aria-hidden="true"
       />
       
       {/* 唇形动画视频 - OmniHuman 生成 */}
       <video
         ref={lipsyncVideoRef}
+        muted
         playsInline
         onEnded={() => setIsPlayingLipsync(false)}
         onError={() => setIsPlayingLipsync(false)}
