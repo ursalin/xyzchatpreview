@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { Upload, RefreshCw, Settings2, Scan, Loader2, Check, Bug, Trash2, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
@@ -8,6 +8,10 @@ import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import idleVideo from '@/assets/character-idle.mp4';
 import posterImg from '@/assets/character-front.jpg';
+
+export interface VideoAvatarRef {
+  playPresetAnimation: () => void;
+}
 
 interface VideoAvatarProps {
   isSpeaking?: boolean;
@@ -259,11 +263,11 @@ const analyzeVideoFrames = async (
   });
 };
 
-const VideoAvatar: React.FC<VideoAvatarProps> = ({ 
+const VideoAvatar = forwardRef<VideoAvatarRef, VideoAvatarProps>(({ 
   isSpeaking = false,
   lipsyncVideoUrl = null,
   onImageLoaded 
-}) => {
+}, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoARef = useRef<HTMLVideoElement>(null);
   const videoBRef = useRef<HTMLVideoElement>(null);
@@ -295,6 +299,19 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
   // 自动播放被阻止时需要用户交互
   const [needsUserInteraction, setNeedsUserInteraction] = useState(false);
   const pendingPlayRef = useRef<(() => Promise<void>) | null>(null);
+
+  // 预设动画播放 - 通过加速idle视频来模拟说话
+  const playPresetAnimation = useCallback(() => {
+    console.log('Playing preset animation - speeding up idle video');
+    // 通过改变播放速率来模拟说话动画
+    if (videoARef.current) videoARef.current.playbackRate = 1.3;
+    if (videoBRef.current) videoBRef.current.playbackRate = 1.3;
+  }, []);
+
+  // 暴露方法给父组件
+  useImperativeHandle(ref, () => ({
+    playPresetAnimation,
+  }), [playPresetAnimation]);
 
   // 同步诊断面板开关
   useEffect(() => {
@@ -1136,6 +1153,8 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       </div>
     </div>
   );
-};
+});
+
+VideoAvatar.displayName = 'VideoAvatar';
 
 export default VideoAvatar;

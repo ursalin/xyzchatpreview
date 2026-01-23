@@ -76,9 +76,10 @@ interface UseVideoCallOptions {
   systemPrompt: string;
   onSpeakingChange?: (isSpeaking: boolean) => void;
   onLipsyncVideoReady?: (videoUrl: string) => void;
+  onPresetAnimationTrigger?: () => void;
 }
 
-export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsyncVideoReady }: UseVideoCallOptions) {
+export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsyncVideoReady, onPresetAnimationTrigger }: UseVideoCallOptions) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -412,7 +413,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     await audio.play();
   }, [onLipsyncVideoReady]);
 
-  // TTS 播放（等待视频生成完成后同步播放）
+  // TTS 播放（根据模式选择预设动画或生成动画）
   const speak = useCallback(async (text: string) => {
     const { voiceConfig } = settings;
     if (!voiceConfig.enabled || !voiceConfig.minimaxApiKey || !voiceConfig.minimaxGroupId) {
@@ -420,6 +421,58 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
       return;
     }
 
+    const lipsyncMode = voiceConfig.lipsyncMode || 'preset';
+
+    // 预设动画模式：只播放音频，触发预设动画
+    if (lipsyncMode === 'preset') {
+      try {
+        console.log('Generating TTS audio (preset mode)...');
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/minimax-tts`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            },
+            body: JSON.stringify({
+              text,
+              apiKey: voiceConfig.minimaxApiKey,
+              groupId: voiceConfig.minimaxGroupId,
+              voiceId: voiceConfig.voiceId,
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'TTS request failed');
+        }
+
+        const data = await response.json();
+        
+        if (data.audioContent) {
+          console.log('TTS audio ready, triggering preset animation...');
+          const audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
+          const audio = new Audio(audioUrl);
+          audioRef.current = audio;
+          
+          // 触发预设动画
+          onPresetAnimationTrigger?.();
+          
+          audio.onplay = () => setIsPlaying(true);
+          audio.onended = () => setIsPlaying(false);
+          audio.onerror = () => setIsPlaying(false);
+          
+          await audio.play();
+        }
+      } catch (error) {
+        console.error('TTS error:', error);
+      }
+      return;
+    }
+
+    // AI生成模式：原有逻辑
     // 先检查缓存
     const cached = getCachedVideo(text);
     if (cached) {
@@ -481,7 +534,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     } catch (error) {
       console.error('TTS error:', error);
     }
-  }, [settings, generateLipsyncVideo, getCachedVideo, playSynced]);
+  }, [settings, generateLipsyncVideo, getCachedVideo, playSynced, onPresetAnimationTrigger]);
 
   // 停止播放
   const stopPlaying = useCallback(() => {

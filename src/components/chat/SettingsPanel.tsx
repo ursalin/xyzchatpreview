@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Settings, User, Key, Type, Volume2 } from 'lucide-react';
-import { AppSettings, defaultSettings, CharacterPreset, ApiConfig, VoiceConfig, LipsyncEngine } from '@/types/chat';
+import { AppSettings, defaultSettings, CharacterPreset, ApiConfig, VoiceConfig, LipsyncMode, LipsyncEngine } from '@/types/chat';
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -283,33 +283,64 @@ export function SettingsPanel({ settings, onSettingsChange }: SettingsPanelProps
                 </div>
 
                 <div className="grid gap-2">
-                  <Label htmlFor="lipsyncEngine">口型同步引擎</Label>
+                  <Label htmlFor="lipsyncMode">动画模式</Label>
                   <Select
-                    value={localSettings.voiceConfig.lipsyncEngine || 'musetalk'}
-                    onValueChange={(value: LipsyncEngine) => updateVoiceConfig({ lipsyncEngine: value })}
+                    value={localSettings.voiceConfig.lipsyncMode || 'preset'}
+                    onValueChange={(value: LipsyncMode) => updateVoiceConfig({ lipsyncMode: value })}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="选择引擎" />
+                      <SelectValue placeholder="选择模式" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="musetalk">
+                      <SelectItem value="preset">
                         <div className="flex flex-col">
-                          <span>MuseTalk</span>
-                          <span className="text-xs text-muted-foreground">快速、质量稳定</span>
+                          <span>预设动画</span>
+                          <span className="text-xs text-muted-foreground">快速、使用预上传的动画片段</span>
                         </div>
                       </SelectItem>
-                      <SelectItem value="omnihuman">
+                      <SelectItem value="generate">
                         <div className="flex flex-col">
-                          <span>OmniHuman (ByteDance)</span>
-                          <span className="text-xs text-muted-foreground">高质量、但较慢</span>
+                          <span>AI生成</span>
+                          <span className="text-xs text-muted-foreground">实时生成口型、较慢</span>
                         </div>
                       </SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    用于视频通话时的口型同步动画生成
+                    预设模式快速但需要预先上传动画；AI生成模式慢但口型精准
                   </p>
                 </div>
+
+                {localSettings.voiceConfig.lipsyncMode === 'generate' && (
+                  <div className="grid gap-2">
+                    <Label htmlFor="lipsyncEngine">口型同步引擎</Label>
+                    <Select
+                      value={localSettings.voiceConfig.lipsyncEngine || 'musetalk'}
+                      onValueChange={(value: LipsyncEngine) => updateVoiceConfig({ lipsyncEngine: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="选择引擎" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="musetalk">
+                          <div className="flex flex-col">
+                            <span>MuseTalk</span>
+                            <span className="text-xs text-muted-foreground">快速、质量稳定</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="omnihuman">
+                          <div className="flex flex-col">
+                            <span>OmniHuman (ByteDance)</span>
+                            <span className="text-xs text-muted-foreground">高质量、但较慢</span>
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      用于视频通话时的口型同步动画生成
+                    </p>
+                  </div>
+                )}
               </>
             )}
 

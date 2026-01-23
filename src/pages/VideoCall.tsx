@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import VideoCallPanel from '@/components/videocall/VideoCallPanel';
-import Live2DPanel from '@/components/live2d/Live2DPanel';
+import Live2DPanel, { Live2DPanelRef } from '@/components/live2d/Live2DPanel';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, PanelLeftClose, PanelLeft } from 'lucide-react';
 
@@ -11,6 +11,12 @@ const VideoCall = () => {
   const [showAvatar, setShowAvatar] = useState(true);
   const [lipsyncVideoUrl, setLipsyncVideoUrl] = useState<string | null>(null);
   const [isGeneratingLipsync, setIsGeneratingLipsync] = useState(false);
+  
+  const live2dPanelRef = useRef<Live2DPanelRef>(null);
+
+  const handlePresetAnimationTrigger = useCallback(() => {
+    live2dPanelRef.current?.playPresetAnimation();
+  }, []);
 
   return (
     <div className="h-screen w-full flex bg-background">
@@ -18,6 +24,7 @@ const VideoCall = () => {
       {showAvatar && (
         <div className="hidden md:flex w-1/2 lg:w-[45%] p-4 relative">
           <Live2DPanel 
+            ref={live2dPanelRef}
             isSpeaking={isSpeaking} 
             lipsyncVideoUrl={lipsyncVideoUrl}
             isGeneratingLipsync={isGeneratingLipsync}
@@ -63,6 +70,7 @@ const VideoCall = () => {
             onCallStateChange={setIsInCall}
             onLipsyncVideoReady={setLipsyncVideoUrl}
             onLipsyncGeneratingChange={setIsGeneratingLipsync}
+            onPresetAnimationTrigger={handlePresetAnimationTrigger}
           />
         </div>
       </div>

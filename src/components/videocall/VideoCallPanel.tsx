@@ -26,6 +26,7 @@ interface VideoCallPanelProps {
   onCallStateChange?: (isInCall: boolean) => void;
   onLipsyncVideoReady?: (videoUrl: string) => void;
   onLipsyncGeneratingChange?: (isGenerating: boolean) => void;
+  onPresetAnimationTrigger?: () => void;
 }
 
 const VideoCallPanel: React.FC<VideoCallPanelProps> = ({
@@ -33,6 +34,7 @@ const VideoCallPanel: React.FC<VideoCallPanelProps> = ({
   onCallStateChange,
   onLipsyncVideoReady,
   onLipsyncGeneratingChange,
+  onPresetAnimationTrigger,
 }) => {
   const { settings } = useSettings();
   const userVideoRef = useRef<HTMLVideoElement>(null);
@@ -70,6 +72,7 @@ const VideoCallPanel: React.FC<VideoCallPanelProps> = ({
     systemPrompt,
     onSpeakingChange,
     onLipsyncVideoReady,
+    onPresetAnimationTrigger,
   });
 
   // 通知父组件唇形动画生成状态
