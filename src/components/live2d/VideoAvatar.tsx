@@ -420,15 +420,28 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
 
     const safePlay = async (v: HTMLVideoElement): Promise<boolean> => {
       try {
-        await v.play();
+        // 确保视频已静音（某些浏览器要求静音才能自动播放）
+        v.muted = true;
+        const playPromise = v.play();
+        if (playPromise !== undefined) {
+          await playPromise;
+        }
         return true;
       } catch (e) {
+        console.warn('Video play error:', e);
         // 检测是否是自动播放被阻止
         if (e instanceof Error && e.name === 'NotAllowedError') {
           console.warn('Autoplay blocked, waiting for user interaction');
           return false;
         }
-        return true; // 其他错误忽略
+        // 对于其他错误（如 AbortError），尝试重新播放
+        try {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          await v.play();
+          return true;
+        } catch {
+          return false;
+        }
       }
     };
 
@@ -615,6 +628,12 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
     // 初始化视频
     const initVideos = () => {
       setLoadError(null);
+      // 确保视频属性正确设置
+      [videoA, videoB].forEach(v => {
+        v.muted = true;
+        v.playsInline = true;
+        v.preload = 'auto';
+      });
       videoA.src = src;
       videoB.src = src;
       videoA.load();
@@ -630,12 +649,21 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       const { loopStart } = Number.isFinite(d) ? getLoopBounds(d) : { loopStart: 0 };
 
       await seekAndPark(videoA, loopStart);
-      const playSuccess = await safePlay(videoA);
+      
+      // 尝试多次播放（某些浏览器需要）
+      let playSuccess = false;
+      for (let attempt = 0; attempt < 3 && !playSuccess; attempt++) {
+        if (attempt > 0) {
+          await new Promise(resolve => setTimeout(resolve, 100 * attempt));
+        }
+        playSuccess = await safePlay(videoA);
+      }
       
       if (!playSuccess) {
         // 自动播放被阻止，需要用户交互
         pendingPlayRef.current = async () => {
           setNeedsUserInteraction(false);
+          videoA.muted = true;
           await videoA.play();
           await waitForFrame(videoA);
           renderFrame();
