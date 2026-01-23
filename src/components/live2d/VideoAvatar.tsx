@@ -611,7 +611,18 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       videoB.load();
     };
 
+    // 使用标记确保只初始化一次
+    let initialized = false;
+    
     const onCanPlayA = async () => {
+      // 关键：防止 canplay 和 loadeddata 双重触发
+      if (initialized || destroyed) return;
+      initialized = true;
+      
+      // 移除所有监听器，防止重复调用
+      videoA.removeEventListener('canplay', onCanPlayA);
+      videoA.removeEventListener('loadeddata', onCanPlayA);
+      
       // 设置 Canvas 尺寸
       canvas.width = videoA.videoWidth || 640;
       canvas.height = videoA.videoHeight || 480;
@@ -639,12 +650,14 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
 
     const onVideoError = () => {
       // 关键：不要一直转圈，让用户看到明确的失败状态
-      setLoadError('视频素材加载失败');
+      if (!initialized) {
+        setLoadError('视频素材加载失败');
+      }
     };
 
     // 有些浏览器/场景下 canplay 事件可能不稳定，增加 loadeddata 作为兜底
-    videoA.addEventListener('canplay', onCanPlayA, { once: true });
-    videoA.addEventListener('loadeddata', onCanPlayA, { once: true });
+    videoA.addEventListener('canplay', onCanPlayA);
+    videoA.addEventListener('loadeddata', onCanPlayA);
     videoA.addEventListener('error', onVideoError);
     initVideos();
 
@@ -654,6 +667,8 @@ const VideoAvatar: React.FC<VideoAvatarProps> = ({
       videoA.pause();
       videoB.pause();
 
+      videoA.removeEventListener('canplay', onCanPlayA);
+      videoA.removeEventListener('loadeddata', onCanPlayA);
       videoA.removeEventListener('error', onVideoError);
     };
   }, [src, onImageLoaded]);
