@@ -31,30 +31,31 @@ serve(async (req) => {
     console.log("API Key length:", OPENAI_API_KEY.length);
 
     try {
-      // Method 1: Use headers for authentication (most common for reverse proxies)
-      const openaiWs = new WebSocket(openaiWsUrl, {
-        headers: {
-          "Authorization": `Bearer ${OPENAI_API_KEY}`,
-          "OpenAI-Beta": "realtime=v1"
-        }
-      } as any);
+      // IMPORTANT: In this runtime, the WebSocket constructor does NOT accept custom headers.
+      // The 2nd argument is *subprotocol(s)*. Passing an object causes: "Invalid protocol value".
+      // We therefore authenticate using the standard OpenAI Realtime WS subprotocols.
+      const openaiSocket = new WebSocket(openaiWsUrl, [
+        "realtime",
+        `openai-insecure-api-key.${OPENAI_API_KEY}`,
+        "openai-beta.realtime=v1",
+      ]);
 
       const { socket: clientSocket, response } = Deno.upgradeWebSocket(req);
       
       let isOpenAIConnected = false;
       const pendingMessages: string[] = [];
 
-      openaiWs.onopen = () => {
+      openaiSocket.onopen = () => {
         console.log("Connected to OpenAI Realtime API");
         isOpenAIConnected = true;
         // Send any pending messages
         for (const msg of pendingMessages) {
-          openaiWs.send(msg);
+          openaiSocket.send(msg);
         }
         pendingMessages.length = 0;
       };
 
-      openaiWs.onmessage = (event) => {
+      openaiSocket.onmessage = (event: MessageEvent) => {
         try {
           const data = typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data);
           console.log("OpenAI -> Client:", data.substring(0, 200));
@@ -66,11 +67,11 @@ serve(async (req) => {
         }
       };
 
-      openaiWs.onerror = (event) => {
+      openaiSocket.onerror = (event: Event) => {
         console.error("OpenAI WebSocket error:", event);
       };
 
-      openaiWs.onclose = (event) => {
+      openaiSocket.onclose = (event: CloseEvent) => {
         console.log("OpenAI WebSocket closed:", event.code, event.reason);
         if (clientSocket.readyState === WebSocket.OPEN) {
           clientSocket.close(1000, "OpenAI connection closed");
@@ -85,8 +86,8 @@ serve(async (req) => {
         try {
           const data = typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data);
           console.log("Client -> OpenAI:", data.substring(0, 200));
-          if (isOpenAIConnected && openaiWs.readyState === WebSocket.OPEN) {
-            openaiWs.send(data);
+          if (isOpenAIConnected && openaiSocket.readyState === WebSocket.OPEN) {
+            openaiSocket.send(data);
           } else {
             pendingMessages.push(data);
           }
@@ -101,8 +102,8 @@ serve(async (req) => {
 
       clientSocket.onclose = (event) => {
         console.log("Client WebSocket closed:", event.code, event.reason);
-        if (openaiWs.readyState === WebSocket.OPEN) {
-          openaiWs.close(1000, "Client disconnected");
+        if (openaiSocket.readyState === WebSocket.OPEN) {
+          openaiSocket.close(1000, "Client disconnected");
         }
       };
 
