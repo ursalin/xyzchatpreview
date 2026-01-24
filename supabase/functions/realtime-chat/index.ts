@@ -19,16 +19,15 @@ serve(async (req) => {
   if (upgrade.toLowerCase() === "websocket") {
     console.log("WebSocket upgrade request received");
     
-    const OPENAI_API_KEY = Deno.env.get("fanxaingdaili");
+    const OPENAI_API_KEY = Deno.env.get("FDCE2");
     if (!OPENAI_API_KEY) {
-      console.error("API key not configured");
-      return new Response("API key not configured", { status: 500 });
+      console.error("Missing FDCE2 API key");
+      return new Response("Missing API key", { status: 500 });
     }
 
     // Connect to OpenAI Realtime API through reverse proxy
-    // Try different connection methods for the reverse proxy
-    const openaiWsUrl = `wss://liu-api.fun/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01`;
-    console.log("Connecting to OpenAI Realtime API via reverse proxy:", openaiWsUrl);
+    const openaiWsUrl = `wss://max.openai365.top/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01`;
+    console.log("Connecting to OpenAI Realtime API via new proxy:", openaiWsUrl);
     console.log("API Key length:", OPENAI_API_KEY.length);
 
     try {
