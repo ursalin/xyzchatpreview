@@ -232,23 +232,48 @@ serve(async (req) => {
     }
 
     console.log("Connecting to Doubao Realtime API...");
-    console.log("App ID:", VOLCENGINE_APP_ID);
+    // 不打印明文凭证，避免泄漏；仅打印长度用于排查
+    console.log("App ID length:", VOLCENGINE_APP_ID.length);
+    console.log("Access key length:", VOLCENGINE_ACCESS_KEY.length);
 
     try {
-      // 构建带认证参数的 WebSocket URL
-      // 豆包 Realtime API 需要在 URL 中传递认证信息
       const connectId = crypto.randomUUID();
-      // 文档要求的必传头：X-Api-App-Key（固定值）
-      // 说明：当前运行时的 WebSocket 客户端无法在握手阶段自定义 headers，
-      // 因此这里采用 query 方式透传；若后续运行时支持 headers，应切回 headers 方式。
-      const wsUrlWithAuth = `${DOUBAO_WS_URL}?X-Api-App-ID=${encodeURIComponent(VOLCENGINE_APP_ID)}&X-Api-Access-Key=${encodeURIComponent(VOLCENGINE_ACCESS_KEY)}&X-Api-Resource-Id=volc.speech.dialog&X-Api-App-Key=PlgvMymc7f3tQnJ6&X-Api-Connect-Id=${connectId}`;
-      
-      console.log("Connecting to URL:", DOUBAO_WS_URL);
-      
-      // 连接到豆包 Realtime API
-      const doubaoSocket = new WebSocket(wsUrlWithAuth);
-
       const { socket: clientSocket, response } = Deno.upgradeWebSocket(req);
+
+      const sendProxyError = (message: string) => {
+        try {
+          if (clientSocket.readyState === WebSocket.OPEN) {
+            clientSocket.send(JSON.stringify({ type: "proxy.error", message }));
+          }
+        } catch {
+          // ignore
+        }
+      };
+
+      console.log("Connecting to URL:", DOUBAO_WS_URL);
+
+      // 连接到豆包 Realtime API
+      // 注意：Edge Runtime 的 WebSocket 类型声明不包含 headers 选项，但部分运行时实际支持。
+      // 我们优先尝试 headers 鉴权；若运行时不支持，则回退到 query 透传（可能被网关拒绝，出现 400）。
+      let doubaoSocket: WebSocket;
+      const upstreamHeaders = {
+        "X-Api-App-ID": VOLCENGINE_APP_ID,
+        "X-Api-Access-Key": VOLCENGINE_ACCESS_KEY,
+        "X-Api-Resource-Id": "volc.speech.dialog",
+        "X-Api-App-Key": "PlgvMymc7f3tQnJ6",
+        "X-Api-Connect-Id": connectId,
+      };
+
+      try {
+        doubaoSocket = new (WebSocket as any)(DOUBAO_WS_URL, { headers: upstreamHeaders });
+        console.log("Upstream connect: using headers auth");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn("Upstream connect: headers not supported, falling back to query auth. reason:", msg);
+
+        const wsUrlWithAuth = `${DOUBAO_WS_URL}?X-Api-App-ID=${encodeURIComponent(VOLCENGINE_APP_ID)}&X-Api-Access-Key=${encodeURIComponent(VOLCENGINE_ACCESS_KEY)}&X-Api-Resource-Id=volc.speech.dialog&X-Api-App-Key=PlgvMymc7f3tQnJ6&X-Api-Connect-Id=${connectId}`;
+        doubaoSocket = new WebSocket(wsUrlWithAuth);
+      }
       
       let isDoubaoConnected = false;
       let currentSessionId = "";
@@ -437,12 +462,7 @@ serve(async (req) => {
 
       doubaoSocket.onerror = (event: Event) => {
         console.error("Doubao WebSocket error:", event);
-        if (clientSocket.readyState === WebSocket.OPEN) {
-          clientSocket.send(JSON.stringify({
-            type: "proxy.error",
-            message: "Upstream WebSocket error"
-          }));
-        }
+        sendProxyError("上游 WebSocket 连接错误（可能是鉴权/资源未开通/网络问题）");
       };
 
       doubaoSocket.onclose = (event: CloseEvent) => {
