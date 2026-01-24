@@ -26,15 +26,19 @@ serve(async (req) => {
     }
 
     // Connect to OpenAI Realtime API through reverse proxy
-    const openaiWsUrl = "wss://liu-api.fun/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01";
+    // Try different connection methods for the reverse proxy
+    const openaiWsUrl = `wss://liu-api.fun/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01`;
     console.log("Connecting to OpenAI Realtime API via reverse proxy:", openaiWsUrl);
+    console.log("API Key length:", OPENAI_API_KEY.length);
 
     try {
-      const openaiWs = new WebSocket(openaiWsUrl, [
-        "realtime",
-        `openai-insecure-api-key.${OPENAI_API_KEY}`,
-        "openai-beta.realtime-v1"
-      ]);
+      // Method 1: Use headers for authentication (most common for reverse proxies)
+      const openaiWs = new WebSocket(openaiWsUrl, {
+        headers: {
+          "Authorization": `Bearer ${OPENAI_API_KEY}`,
+          "OpenAI-Beta": "realtime=v1"
+        }
+      } as any);
 
       const { socket: clientSocket, response } = Deno.upgradeWebSocket(req);
       
