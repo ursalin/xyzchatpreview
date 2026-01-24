@@ -50,26 +50,23 @@ serve(async (req) => {
     console.log("Processing audio for speech-to-text...");
     console.log("Audio base64 length:", audio.length);
 
-    // Process audio in chunks
-    const binaryAudio = processBase64Chunks(audio);
-    console.log("Binary audio size:", binaryAudio.length);
+    // Clean and validate base64 - remove data URL prefix if present and whitespace
+    let cleanBase64 = audio;
+    if (cleanBase64.includes(',')) {
+      cleanBase64 = cleanBase64.split(',')[1];
+    }
+    cleanBase64 = cleanBase64.replace(/\s/g, '');
+    
+    // Ensure proper base64 padding
+    const paddingNeeded = (4 - (cleanBase64.length % 4)) % 4;
+    cleanBase64 += '='.repeat(paddingNeeded);
+    
+    console.log("Cleaned base64 length:", cleanBase64.length);
     
     // Use Lovable AI Gateway for transcription
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
       throw new Error("LOVABLE_API_KEY is not configured");
-    }
-
-    // Convert audio to base64 for Lovable AI
-    let audioBase64 = "";
-    const chunkSize = 8192;
-    for (let i = 0; i < binaryAudio.length; i += chunkSize) {
-      const chunk = binaryAudio.slice(i, i + chunkSize);
-      let binary = "";
-      for (let j = 0; j < chunk.length; j++) {
-        binary += String.fromCharCode(chunk[j]);
-      }
-      audioBase64 += btoa(binary);
     }
 
     // Use the correct Lovable AI Gateway URL
@@ -92,7 +89,7 @@ serve(async (req) => {
               {
                 type: "image_url",
                 image_url: {
-                  url: `data:audio/webm;base64,${audioBase64}`
+                  url: `data:audio/webm;base64,${cleanBase64}`
                 }
               }
             ]
