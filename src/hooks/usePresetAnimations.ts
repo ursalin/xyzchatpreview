@@ -18,6 +18,28 @@ interface StoredAnimation {
   duration: number;
 }
 
+// 获取音频时长（毫秒）
+export function getAudioDuration(audioBase64: string): Promise<number> {
+  return new Promise((resolve) => {
+    const audioUrl = `data:audio/mpeg;base64,${audioBase64}`;
+    const audio = new Audio();
+    
+    audio.onloadedmetadata = () => {
+      resolve(audio.duration * 1000);
+    };
+    
+    audio.onerror = () => {
+      console.warn('Could not get audio duration, defaulting to 3000ms');
+      resolve(3000);
+    };
+    
+    // 超时保护
+    setTimeout(() => resolve(3000), 2000);
+    
+    audio.src = audioUrl;
+  });
+}
+
 export function usePresetAnimations() {
   const [animations, setAnimations] = useState<PresetAnimation[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -126,37 +148,55 @@ export function usePresetAnimations() {
     return best;
   }, [animations]);
 
-  // 同步播放音频和预设动画
+  // 核心同步播放函数 - 精确音画同步
   const playSynced = useCallback(async (
     audioBase64: string,
-    video: HTMLVideoElement,
     onStart?: () => void,
     onEnd?: () => void
   ): Promise<void> => {
-    // 获取随机或最佳动画
-    const animation = getRandomAnimation();
+    // 1. 先获取音频时长
+    const audioDurationMs = await getAudioDuration(audioBase64);
+    console.log(`Audio duration: ${audioDurationMs}ms`);
+
+    // 2. 选择最佳动画（根据时长匹配）
+    const animation = getBestAnimation(audioDurationMs) || getRandomAnimation();
+    
+    // 3. 创建音频元素
+    const audioUrl = `data:audio/mpeg;base64,${audioBase64}`;
+    const audio = new Audio(audioUrl);
+    audioRef.current = audio;
+    
+    // 如果没有预设动画，只播放音频
     if (!animation) {
-      // 没有预设动画，只播放音频
-      const audioUrl = `data:audio/mpeg;base64,${audioBase64}`;
-      const audio = new Audio(audioUrl);
-      audioRef.current = audio;
-      
-      audio.onplay = () => onStart?.();
-      audio.onended = () => onEnd?.();
-      
+      console.log('No preset animation available, playing audio only');
+      audio.onplay = () => {
+        setIsPlaying(true);
+        onStart?.();
+      };
+      audio.onended = () => {
+        setIsPlaying(false);
+        onEnd?.();
+      };
       await audio.play();
       return;
     }
 
+    console.log(`Selected animation: ${animation.name} (${animation.duration}ms) for audio ${audioDurationMs}ms`);
+
     return new Promise((resolve) => {
-      const audioUrl = `data:audio/mpeg;base64,${audioBase64}`;
-      const audio = new Audio(audioUrl);
-      audioRef.current = audio;
+      // 4. 创建视频元素
+      const video = document.createElement('video');
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = 'auto';
+      video.src = animation.videoUrl;
       videoRef.current = video;
 
-      // 设置视频源
-      video.src = animation.videoUrl;
-      video.load();
+      // 5. 计算播放速率以匹配音频时长
+      const playbackRate = animation.duration / audioDurationMs;
+      // 限制播放速率在合理范围内 (0.5x - 2x)
+      const clampedRate = Math.max(0.5, Math.min(2.0, playbackRate));
+      console.log(`Playback rate: ${clampedRate.toFixed(2)}x`);
 
       let videoReady = false;
       let audioReady = false;
@@ -166,68 +206,102 @@ export function usePresetAnimations() {
         if (!videoReady || !audioReady || started) return;
         started = true;
 
+        console.log('Both media ready, starting synced playback');
         setIsPlaying(true);
         setCurrentAnimationId(animation.id);
         onStart?.();
 
-        // 同时开始播放
+        // 设置播放速率
+        video.playbackRate = clampedRate;
+        
+        // 同步开始播放
         try {
           video.currentTime = 0;
           audio.currentTime = 0;
+          
+          // 同时触发播放
           await Promise.all([video.play(), audio.play()]);
         } catch (e) {
           console.error('Synced playback error:', e);
+          // 尝试只播放音频
+          try { await audio.play(); } catch { /* ignore */ }
         }
       };
 
       const onFinish = () => {
         setIsPlaying(false);
         setCurrentAnimationId(null);
+        video.pause();
+        video.src = '';
         onEnd?.();
         resolve();
       };
 
+      // 视频就绪检测
       video.oncanplaythrough = () => {
-        videoReady = true;
-        tryStart();
+        if (!videoReady) {
+          videoReady = true;
+          console.log('Video ready');
+          tryStart();
+        }
       };
 
+      // 音频就绪检测
       audio.oncanplaythrough = () => {
-        audioReady = true;
-        tryStart();
+        if (!audioReady) {
+          audioReady = true;
+          console.log('Audio ready');
+          tryStart();
+        }
       };
 
-      // 音频结束时停止视频（音频为主）
+      // 以音频结束为准
       audio.onended = () => {
-        video.pause();
-        video.currentTime = 0;
+        console.log('Audio ended, stopping video');
         onFinish();
       };
 
-      // 如果音频较长，视频循环播放
+      // 如果音频比视频长，视频需要循环
       video.onended = () => {
         if (!audio.ended && !audio.paused) {
+          console.log('Video ended but audio still playing, looping video');
           video.currentTime = 0;
           video.play().catch(() => {});
         }
       };
 
-      audio.onerror = () => {
-        video.pause();
+      audio.onerror = (e) => {
+        console.error('Audio error:', e);
         onFinish();
       };
+
+      // 超时保护：如果5秒内没开始，强制开始
+      setTimeout(() => {
+        if (!started) {
+          console.warn('Timeout waiting for media ready, forcing start');
+          videoReady = true;
+          audioReady = true;
+          tryStart();
+        }
+      }, 5000);
+
+      // 开始加载
+      video.load();
+      audio.load();
     });
-  }, [getRandomAnimation]);
+  }, [getRandomAnimation, getBestAnimation]);
 
   // 停止播放
   const stopPlaying = useCallback(() => {
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
+      audioRef.current = null;
     }
     if (videoRef.current) {
       videoRef.current.pause();
-      videoRef.current.currentTime = 0;
+      videoRef.current.src = '';
+      videoRef.current = null;
     }
     setIsPlaying(false);
     setCurrentAnimationId(null);
