@@ -39,7 +39,8 @@ serve(async (req) => {
       throw new Error("Minimax API Key and Group ID are required");
     }
 
-    const voice = voiceId || "male-qn-qingse";
+    // Use provided voiceId or fallback to a valid Minimax T2A v2 voice_id
+    const voice = voiceId || "Chinese (Mandarin)_Warm_Bestie";
 
     console.log("Generating speech with Minimax TTS for text:", text.substring(0, 50) + "...");
 

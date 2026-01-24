@@ -65,7 +65,7 @@ export const defaultVoiceConfig: VoiceConfig = {
   enabled: false,
   minimaxApiKey: '',
   minimaxGroupId: '',
-  voiceId: 'female-tianmei',
+  voiceId: 'Chinese (Mandarin)_Warm_Bestie',  // Updated to valid Minimax T2A v2 voice_id
   lipsyncMode: 'preset',
   lipsyncEngine: 'musetalk',
 };
