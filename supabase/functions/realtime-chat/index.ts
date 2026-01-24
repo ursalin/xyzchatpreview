@@ -44,12 +44,15 @@ serve(async (req) => {
       // - Otherwise, fallback to passing key via query param (proxy-dependent) while keeping beta subprotocol.
       let openaiSocket: WebSocket;
 
-      if (isValidWsToken(keyToken)) {
+       // NOTE: Subprotocol values must be valid RFC tokens (no '='). Use the OpenAI beta protocol token form.
+       const betaProtocol = "openai-beta.realtime-v1";
+
+       if (isValidWsToken(keyToken)) {
         console.log("Upstream auth: subprotocol (openai-insecure-api-key.*)");
         openaiSocket = new WebSocket(openaiWsUrlBase, [
           "realtime",
           keyToken,
-          "openai-beta.realtime=v1",
+           betaProtocol,
         ]);
       } else {
         console.warn(
@@ -57,7 +60,7 @@ serve(async (req) => {
         );
         const openaiWsUrl = `${openaiWsUrlBase}&api_key=${encodeURIComponent(OPENAI_API_KEY)}`;
         // Keep beta subprotocol (valid token) so upstream can still enable realtime=v1 behavior if supported.
-        openaiSocket = new WebSocket(openaiWsUrl, ["realtime", "openai-beta.realtime=v1"]);
+         openaiSocket = new WebSocket(openaiWsUrl, ["realtime", betaProtocol]);
       }
 
       const { socket: clientSocket, response } = Deno.upgradeWebSocket(req);
