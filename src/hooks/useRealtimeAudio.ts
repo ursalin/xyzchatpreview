@@ -131,10 +131,11 @@ interface UseRealtimeAudioOptions {
   onTranscript?: (text: string, isFinal: boolean) => void;
   onSpeakingChange?: (isSpeaking: boolean) => void;
   onError?: (error: string) => void;
+  onAudioComplete?: (audioBase64: string) => void; // 完整音频响应回调
 }
 
 export function useRealtimeAudio(options: UseRealtimeAudioOptions = {}) {
-  const { systemPrompt, voiceId = 'alloy', onTranscript, onSpeakingChange, onError } = options;
+  const { systemPrompt, voiceId = 'alloy', onTranscript, onSpeakingChange, onError, onAudioComplete } = options;
 
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -150,6 +151,7 @@ export function useRealtimeAudio(options: UseRealtimeAudioOptions = {}) {
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const sessionCreatedRef = useRef(false);
   const audioChunkIdRef = useRef(0);
+  const audioChunksRef = useRef<string[]>([]); // 累积完整音频响应
 
   const handleSpeakingChange = useCallback((speaking: boolean) => {
     setIsSpeaking(speaking);
@@ -233,6 +235,9 @@ export function useRealtimeAudio(options: UseRealtimeAudioOptions = {}) {
 
             case 'response.audio.delta':
               if (data.delta) {
+                // 累积音频块
+                audioChunksRef.current.push(data.delta);
+                
                 const binaryString = atob(data.delta);
                 const bytes = new Uint8Array(binaryString.length);
                 for (let i = 0; i < binaryString.length; i++) {
@@ -244,7 +249,34 @@ export function useRealtimeAudio(options: UseRealtimeAudioOptions = {}) {
               break;
 
             case 'response.audio.done':
-              console.log("Audio response complete");
+              console.log("Audio response complete, chunks:", audioChunksRef.current.length);
+              // 合并所有音频块并回调
+              if (audioChunksRef.current.length > 0 && onAudioComplete) {
+                try {
+                  // 将所有 base64 块合并
+                  const allBinaryChunks: number[] = [];
+                  for (const chunk of audioChunksRef.current) {
+                    const binaryString = atob(chunk);
+                    for (let i = 0; i < binaryString.length; i++) {
+                      allBinaryChunks.push(binaryString.charCodeAt(i));
+                    }
+                  }
+                  // 转换为 base64
+                  const fullAudioBytes = new Uint8Array(allBinaryChunks);
+                  let binary = '';
+                  const chunkSize = 0x8000;
+                  for (let i = 0; i < fullAudioBytes.length; i += chunkSize) {
+                    const subChunk = fullAudioBytes.subarray(i, Math.min(i + chunkSize, fullAudioBytes.length));
+                    binary += String.fromCharCode.apply(null, Array.from(subChunk));
+                  }
+                  const fullAudioBase64 = btoa(binary);
+                  console.log("Full audio length:", fullAudioBase64.length);
+                  onAudioComplete(fullAudioBase64);
+                } catch (e) {
+                  console.error("Failed to merge audio chunks:", e);
+                }
+              }
+              audioChunksRef.current = []; // 清空
               break;
 
             case 'response.done':
