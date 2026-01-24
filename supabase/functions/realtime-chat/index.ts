@@ -30,38 +30,12 @@ serve(async (req) => {
     console.log("Connecting to OpenAI Realtime API via proxy:", openaiWsUrlBase);
     console.log("API Key length:", OPENAI_API_KEY.length);
 
-    // WebSocket subprotocol values must be RFC token chars only.
-    // Some proxy/API keys may contain characters that are invalid as subprotocols (e.g. '=', '/', space),
-    // which will throw: "SyntaxError: Invalid protocol value".
-    const isValidWsToken = (value: string) => /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(value);
-    const keyToken = `openai-insecure-api-key.${OPENAI_API_KEY}`;
-
+    // Strategy: Always pass API key via query param to avoid subprotocol issues with reverse proxies.
+    // This maximizes compatibility with third-party proxy services.
     try {
-      // IMPORTANT: This runtime's WebSocket constructor does NOT accept custom headers.
-      // The 2nd argument is *subprotocol(s)*.
-      // Strategy:
-      // - If the key is a valid WS token, pass it via the official subprotocol.
-      // - Otherwise, fallback to passing key via query param (proxy-dependent) while keeping beta subprotocol.
-      let openaiSocket: WebSocket;
-
-       // NOTE: Subprotocol values must be valid RFC tokens (no '='). Use the OpenAI beta protocol token form.
-       const betaProtocol = "openai-beta.realtime-v1";
-
-       if (isValidWsToken(keyToken)) {
-        console.log("Upstream auth: subprotocol (openai-insecure-api-key.*)");
-        openaiSocket = new WebSocket(openaiWsUrlBase, [
-          "realtime",
-          keyToken,
-           betaProtocol,
-        ]);
-      } else {
-        console.warn(
-          "API key contains chars invalid for WS subprotocol; falling back to query param auth (proxy-dependent).",
-        );
-        const openaiWsUrl = `${openaiWsUrlBase}&api_key=${encodeURIComponent(OPENAI_API_KEY)}`;
-        // Keep beta subprotocol (valid token) so upstream can still enable realtime=v1 behavior if supported.
-         openaiSocket = new WebSocket(openaiWsUrl, ["realtime", betaProtocol]);
-      }
+      const openaiWsUrl = `${openaiWsUrlBase}&api_key=${encodeURIComponent(OPENAI_API_KEY)}`;
+      console.log("Connecting to upstream with query param auth");
+      const openaiSocket = new WebSocket(openaiWsUrl, ["realtime", "openai-beta.realtime-v1"]);
 
       const { socket: clientSocket, response } = Deno.upgradeWebSocket(req);
       

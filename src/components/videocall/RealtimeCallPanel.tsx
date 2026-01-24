@@ -3,9 +3,9 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { 
   Phone, PhoneOff, Mic, MicOff, Send, MessageSquare, 
-  Video, VideoOff, Volume2, VolumeX, Camera
+  Video, VideoOff, Volume2, VolumeX, Camera, AlertTriangle, Copy, RefreshCw, ChevronDown, ChevronUp
 } from 'lucide-react';
-import { useRealtimeAudio } from '@/hooks/useRealtimeAudio';
+import { useRealtimeAudio, ConnectionDiagnostics } from '@/hooks/useRealtimeAudio';
 import { useSettings } from '@/hooks/useSettings';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -62,12 +62,15 @@ ${settings.character.background}
     return prompt;
   }, [settings.character, callMode]);
 
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+
   const {
     isConnected,
     isRecording,
     isSpeaking,
     transcript,
     aiResponse,
+    diagnostics,
     connect,
     disconnect,
     startRecording,
@@ -328,6 +331,18 @@ ${settings.character.background}
     }
   };
 
+  // 复制诊断信息
+  const copyDiagnostics = () => {
+    const info = `WebSocket Diagnostics
+Status: ${diagnostics.status}
+Close Code: ${diagnostics.lastCloseCode ?? 'N/A'}
+Close Reason: ${diagnostics.lastCloseReason ?? 'N/A'}
+Proxy Error: ${diagnostics.proxyError ?? 'N/A'}
+Timestamp: ${diagnostics.timestamp?.toISOString() ?? 'N/A'}`;
+    navigator.clipboard.writeText(info);
+    toast.success('诊断信息已复制');
+  };
+
   return (
     <div className="h-full flex flex-col bg-gradient-to-b from-background to-muted/20 relative">
       {/* 隐藏的canvas用于帧采样 */}
@@ -358,7 +373,46 @@ ${settings.character.background}
 
       {/* 消息区域 */}
       <div className="flex-1 overflow-y-auto p-4 pt-14 space-y-3">
-        {messages.length === 0 && !isConnected && (
+        {/* 连接错误诊断面板 */}
+        {diagnostics.status === 'error' && (
+          <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4 mb-3">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <h4 className="font-medium text-destructive mb-1">连接失败</h4>
+                <p className="text-sm text-muted-foreground mb-2">
+                  {diagnostics.proxyError || '上游 WebSocket 连接错误'}
+                </p>
+                <button 
+                  onClick={() => setShowDiagnostics(!showDiagnostics)}
+                  className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                >
+                  {showDiagnostics ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                  {showDiagnostics ? '收起详情' : '展开详情'}
+                </button>
+                {showDiagnostics && (
+                  <div className="mt-2 p-2 bg-muted/50 rounded text-xs font-mono space-y-1">
+                    <p>Status: <span className="text-destructive">{diagnostics.status}</span></p>
+                    <p>Close Code: {diagnostics.lastCloseCode ?? 'N/A'}</p>
+                    <p>Close Reason: {diagnostics.lastCloseReason || 'N/A'}</p>
+                    <p>Proxy Error: {diagnostics.proxyError || 'N/A'}</p>
+                    <p>Time: {diagnostics.timestamp?.toLocaleTimeString() ?? 'N/A'}</p>
+                  </div>
+                )}
+                <div className="flex gap-2 mt-3">
+                  <Button size="sm" variant="outline" onClick={copyDiagnostics}>
+                    <Copy className="h-3 w-3 mr-1" /> 复制日志
+                  </Button>
+                  <Button size="sm" variant="default" onClick={handleStartCall}>
+                    <RefreshCw className="h-3 w-3 mr-1" /> 重试连接
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {messages.length === 0 && !isConnected && diagnostics.status !== 'error' && (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             <Phone className="h-12 w-12 mb-4 opacity-50" />
             <p className="text-center">点击下方按钮开始{callMode === 'video' ? '视频' : '语音'}通话</p>

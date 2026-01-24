@@ -134,6 +134,14 @@ interface UseRealtimeAudioOptions {
   onAudioComplete?: (audioBase64: string) => void; // 完整音频响应回调
 }
 
+export interface ConnectionDiagnostics {
+  status: 'disconnected' | 'connecting' | 'connected' | 'error';
+  lastCloseCode?: number;
+  lastCloseReason?: string;
+  proxyError?: string;
+  timestamp?: Date;
+}
+
 export function useRealtimeAudio(options: UseRealtimeAudioOptions = {}) {
   const { systemPrompt, voiceId = 'alloy', onTranscript, onSpeakingChange, onError, onAudioComplete } = options;
 
@@ -142,6 +150,7 @@ export function useRealtimeAudio(options: UseRealtimeAudioOptions = {}) {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [aiResponse, setAiResponse] = useState('');
+  const [diagnostics, setDiagnostics] = useState<ConnectionDiagnostics>({ status: 'disconnected' });
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -164,6 +173,8 @@ export function useRealtimeAudio(options: UseRealtimeAudioOptions = {}) {
       return;
     }
 
+    setDiagnostics({ status: 'connecting', timestamp: new Date() });
+
     try {
       // Initialize audio context
       audioContextRef.current = new AudioContext({ sampleRate: 24000 });
@@ -179,6 +190,7 @@ export function useRealtimeAudio(options: UseRealtimeAudioOptions = {}) {
       ws.onopen = () => {
         console.log("WebSocket connected");
         setIsConnected(true);
+        setDiagnostics({ status: 'connected', timestamp: new Date() });
       };
 
       ws.onmessage = async (event) => {
@@ -298,6 +310,27 @@ export function useRealtimeAudio(options: UseRealtimeAudioOptions = {}) {
               console.error("OpenAI error:", data.error);
               onError?.(data.error?.message || 'Unknown error');
               break;
+
+            case 'proxy.error':
+              console.error("Proxy error:", data.message);
+              setDiagnostics(prev => ({
+                ...prev,
+                status: 'error',
+                proxyError: data.message || 'Upstream WebSocket error',
+                timestamp: new Date()
+              }));
+              break;
+
+            case 'proxy.closed':
+              console.log("Proxy closed:", data.code, data.reason);
+              setDiagnostics(prev => ({
+                ...prev,
+                status: 'error',
+                lastCloseCode: data.code,
+                lastCloseReason: data.reason || 'Upstream connection closed',
+                timestamp: new Date()
+              }));
+              break;
           }
         } catch (e) {
           console.error("Error processing message:", e);
@@ -306,6 +339,12 @@ export function useRealtimeAudio(options: UseRealtimeAudioOptions = {}) {
 
       ws.onerror = (error) => {
         console.error("WebSocket error:", error);
+        setDiagnostics(prev => ({
+          ...prev,
+          status: 'error',
+          proxyError: 'WebSocket connection error',
+          timestamp: new Date()
+        }));
         onError?.("WebSocket connection error");
       };
 
@@ -313,9 +352,17 @@ export function useRealtimeAudio(options: UseRealtimeAudioOptions = {}) {
         console.log("WebSocket closed:", event.code, event.reason);
         setIsConnected(false);
         sessionCreatedRef.current = false;
+        setDiagnostics(prev => ({
+          ...prev,
+          status: 'disconnected',
+          lastCloseCode: event.code,
+          lastCloseReason: event.reason || '',
+          timestamp: new Date()
+        }));
       };
     } catch (error) {
       console.error("Connection error:", error);
+      setDiagnostics({ status: 'error', proxyError: `Failed to connect: ${error}`, timestamp: new Date() });
       onError?.(`Failed to connect: ${error}`);
     }
   }, [systemPrompt, voiceId, onTranscript, onError, handleSpeakingChange]);
@@ -434,6 +481,7 @@ export function useRealtimeAudio(options: UseRealtimeAudioOptions = {}) {
     isSpeaking,
     transcript,
     aiResponse,
+    diagnostics,
     connect,
     disconnect,
     startRecording,
