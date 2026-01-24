@@ -358,13 +358,24 @@ export function useRealtimeAudio(options: UseRealtimeAudioOptions = {}) {
         console.log("WebSocket closed:", event.code, event.reason);
         setIsConnected(false);
         sessionCreatedRef.current = false;
-        setDiagnostics(prev => ({
-          ...prev,
-          status: 'disconnected',
-          lastCloseCode: event.code,
-          lastCloseReason: event.reason || '',
-          timestamp: new Date()
-        }));
+
+        // 关键：不要在已收到 proxy.error/proxy.closed 后又立刻覆盖成 disconnected，
+        // 否则 UI 会“闪退”看不到错误面板。
+        setDiagnostics(prev => {
+          const hasErrorAlready = prev.status === 'error' || !!prev.proxyError;
+          const looksLikeErrorClose = event.code !== 1000 || (!!event.reason && event.reason !== '');
+          const nextStatus: ConnectionDiagnostics['status'] = (hasErrorAlready || looksLikeErrorClose)
+            ? 'error'
+            : 'disconnected';
+
+          return {
+            ...prev,
+            status: nextStatus,
+            lastCloseCode: event.code,
+            lastCloseReason: event.reason || prev.lastCloseReason || '',
+            timestamp: new Date(),
+          };
+        });
       };
     } catch (error) {
       console.error("Connection error:", error);
