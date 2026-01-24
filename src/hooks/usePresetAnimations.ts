@@ -1,11 +1,15 @@
 import { useRef, useCallback, useState, useEffect } from 'react';
 
+// 内置的说话动画（从 assets 导入）
+import speakingAnimation1 from '@/assets/speaking-animation-1.mp4';
+
 // 预设说话动画配置
 export interface PresetAnimation {
   id: string;
   name: string;
   videoUrl: string;
   duration: number; // 毫秒
+  isBuiltIn?: boolean; // 是否为内置动画
 }
 
 // 用于存储用户上传的预设动画
@@ -17,6 +21,11 @@ interface StoredAnimation {
   videoData: string; // base64 data URL
   duration: number;
 }
+
+// 内置动画列表（会在初始化时加载）
+const BUILT_IN_ANIMATIONS: Array<{ id: string; name: string; videoUrl: string }> = [
+  { id: 'builtin-speaking-1', name: '说话动画1', videoUrl: speakingAnimation1 },
+];
 
 // 获取音频时长（毫秒）
 export function getAudioDuration(audioBase64: string): Promise<number> {
@@ -47,28 +56,74 @@ export function usePresetAnimations() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // 从 localStorage 加载已保存的动画
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(PRESET_ANIMATIONS_KEY);
-      if (stored) {
-        const parsed: StoredAnimation[] = JSON.parse(stored);
-        setAnimations(parsed.map(a => ({
-          id: a.id,
-          name: a.name,
-          videoUrl: a.videoData,
-          duration: a.duration,
-        })));
+  // 加载内置动画的时长
+  const loadBuiltInAnimations = useCallback(async () => {
+    const builtInAnims: PresetAnimation[] = [];
+    
+    for (const anim of BUILT_IN_ANIMATIONS) {
+      try {
+        // 获取视频时长
+        const duration = await new Promise<number>((resolve) => {
+          const video = document.createElement('video');
+          video.preload = 'metadata';
+          video.onloadedmetadata = () => resolve(video.duration * 1000);
+          video.onerror = () => resolve(3000); // 默认3秒
+          video.src = anim.videoUrl;
+        });
+        
+        builtInAnims.push({
+          id: anim.id,
+          name: anim.name,
+          videoUrl: anim.videoUrl,
+          duration,
+          isBuiltIn: true,
+        });
+        console.log(`Loaded built-in animation: ${anim.name} (${duration}ms)`);
+      } catch (e) {
+        console.error(`Failed to load built-in animation ${anim.name}:`, e);
       }
-    } catch (e) {
-      console.error('Failed to load preset animations:', e);
     }
+    
+    return builtInAnims;
   }, []);
 
-  // 保存动画到 localStorage
+  // 从 localStorage 加载用户动画 + 内置动画
+  useEffect(() => {
+    const loadAnimations = async () => {
+      // 1. 加载内置动画
+      const builtIn = await loadBuiltInAnimations();
+      
+      // 2. 加载用户上传的动画
+      let userAnims: PresetAnimation[] = [];
+      try {
+        const stored = localStorage.getItem(PRESET_ANIMATIONS_KEY);
+        if (stored) {
+          const parsed: StoredAnimation[] = JSON.parse(stored);
+          userAnims = parsed.map(a => ({
+            id: a.id,
+            name: a.name,
+            videoUrl: a.videoData,
+            duration: a.duration,
+            isBuiltIn: false,
+          }));
+        }
+      } catch (e) {
+        console.error('Failed to load preset animations:', e);
+      }
+      
+      // 合并：内置 + 用户上传
+      setAnimations([...builtIn, ...userAnims]);
+    };
+    
+    loadAnimations();
+  }, [loadBuiltInAnimations]);
+
+  // 保存动画到 localStorage（只保存用户上传的，不保存内置的）
   const saveAnimations = useCallback((anims: PresetAnimation[]) => {
     try {
-      const toStore: StoredAnimation[] = anims.map(a => ({
+      // 只保存非内置的动画
+      const userAnims = anims.filter(a => !a.isBuiltIn);
+      const toStore: StoredAnimation[] = userAnims.map(a => ({
         id: a.id,
         name: a.name,
         videoData: a.videoUrl,
