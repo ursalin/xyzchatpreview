@@ -341,6 +341,22 @@ export function SettingsPanel({ settings, onSettingsChange }: SettingsPanelProps
                     </p>
                   </div>
                 )}
+
+                {/* 豆包实时通话语音配置 */}
+                <div className="mt-4 pt-4 border-t">
+                  <div className="grid gap-2">
+                    <Label htmlFor="doubaoVoiceId">豆包实时语音 ID</Label>
+                    <Input
+                      id="doubaoVoiceId"
+                      value={localSettings.voiceConfig.doubaoVoiceId || ''}
+                      onChange={(e) => updateVoiceConfig({ doubaoVoiceId: e.target.value })}
+                      placeholder="S_xxxxxx 或留空使用默认"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      实时通话使用的豆包克隆语音ID（从火山引擎控制台复制）
+                    </p>
+                  </div>
+                </div>
               </>
             )}
 

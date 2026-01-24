@@ -37,6 +37,8 @@ export interface VoiceConfig {
   voiceId: string;
   lipsyncMode: LipsyncMode;
   lipsyncEngine: LipsyncEngine;
+  // 豆包实时通话语音配置
+  doubaoVoiceId: string;
 }
 
 export interface AppSettings {
@@ -65,9 +67,10 @@ export const defaultVoiceConfig: VoiceConfig = {
   enabled: false,
   minimaxApiKey: '',
   minimaxGroupId: '',
-  voiceId: 'Chinese (Mandarin)_Warm_Bestie',  // Updated to valid Minimax T2A v2 voice_id
+  voiceId: 'Chinese (Mandarin)_Warm_Bestie',  // Minimax T2A v2 voice_id
   lipsyncMode: 'preset',
   lipsyncEngine: 'musetalk',
+  doubaoVoiceId: '',  // 豆包克隆语音ID，如 S_xxx 格式
 };
 
 export const defaultSettings: AppSettings = {

@@ -78,7 +78,7 @@ ${settings.character.background}
     sendTextMessage
   } = useRealtimeAudio({
     systemPrompt: buildSystemPrompt(),
-    voiceId: 'alloy',
+    voiceId: settings.voiceConfig.doubaoVoiceId || undefined, // 使用豆包克隆语音或默认
     onTranscript: (text, isFinal) => {
       if (isFinal && text.trim()) {
         setMessages(prev => [...prev, {
