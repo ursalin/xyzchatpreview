@@ -4,7 +4,7 @@ import { ChatContainer } from '@/components/chat/ChatContainer';
 import Live2DPanel from '@/components/live2d/Live2DPanel';
 import { useSettings } from '@/hooks/useSettings';
 import { Button } from '@/components/ui/button';
-import { PanelLeftClose, PanelLeft, Video } from 'lucide-react';
+import { PanelLeftClose, PanelLeft, Video, Phone } from 'lucide-react';
 
 const Index = () => {
   const { settings } = useSettings();
@@ -40,6 +40,14 @@ const Index = () => {
             <Button variant="outline" size="sm" className="gap-2">
               <Video className="w-4 h-4" />
               <span className="hidden sm:inline">视频通话</span>
+            </Button>
+          </Link>
+
+          {/* Realtime Voice Call Button */}
+          <Link to="/realtime-call">
+            <Button variant="default" size="sm" className="gap-2">
+              <Phone className="w-4 h-4" />
+              <span className="hidden sm:inline">实时语音</span>
             </Button>
           </Link>
         </div>
