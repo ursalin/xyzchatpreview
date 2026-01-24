@@ -26,7 +26,7 @@ interface VideoCallPanelProps {
   onCallStateChange?: (isInCall: boolean) => void;
   onLipsyncVideoReady?: (videoUrl: string) => void;
   onLipsyncGeneratingChange?: (isGenerating: boolean) => void;
-  onPresetAnimationTrigger?: () => void;
+  onPresetAnimationTrigger?: (audioBase64: string) => void; // 现在传递音频数据
 }
 
 const VideoCallPanel: React.FC<VideoCallPanelProps> = ({

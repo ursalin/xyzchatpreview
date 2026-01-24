@@ -76,7 +76,7 @@ interface UseVideoCallOptions {
   systemPrompt: string;
   onSpeakingChange?: (isSpeaking: boolean) => void;
   onLipsyncVideoReady?: (videoUrl: string) => void;
-  onPresetAnimationTrigger?: () => void;
+  onPresetAnimationTrigger?: (audioBase64: string) => void; // 传递音频数据用于同步
 }
 
 export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsyncVideoReady, onPresetAnimationTrigger }: UseVideoCallOptions) {
@@ -423,7 +423,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
 
     const lipsyncMode = voiceConfig.lipsyncMode || 'preset';
 
-    // 预设动画模式：只播放音频，触发预设动画
+    // 预设动画模式：生成TTS后由预设动画系统同步播放
     if (lipsyncMode === 'preset') {
       try {
         console.log('Generating TTS audio (preset mode)...');
@@ -452,19 +452,21 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
         const data = await response.json();
         
         if (data.audioContent) {
-          console.log('TTS audio ready, triggering preset animation...');
-          const audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
-          const audio = new Audio(audioUrl);
-          audioRef.current = audio;
+          console.log('TTS audio ready, passing to preset animation system for synced playback...');
           
-          // 触发预设动画
-          onPresetAnimationTrigger?.();
-          
-          audio.onplay = () => setIsPlaying(true);
-          audio.onended = () => setIsPlaying(false);
-          audio.onerror = () => setIsPlaying(false);
-          
-          await audio.play();
+          // 将音频数据传递给预设动画系统，由它来处理同步播放
+          if (onPresetAnimationTrigger) {
+            onPresetAnimationTrigger(data.audioContent);
+          } else {
+            // 后备：如果没有预设动画处理器，直接播放音频
+            const audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
+            const audio = new Audio(audioUrl);
+            audioRef.current = audio;
+            audio.onplay = () => setIsPlaying(true);
+            audio.onended = () => setIsPlaying(false);
+            audio.onerror = () => setIsPlaying(false);
+            await audio.play();
+          }
         }
       } catch (error) {
         console.error('TTS error:', error);

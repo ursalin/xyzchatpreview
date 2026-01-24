@@ -14,8 +14,10 @@ const VideoCall = () => {
   
   const live2dPanelRef = useRef<Live2DPanelRef>(null);
 
-  const handlePresetAnimationTrigger = useCallback(() => {
-    live2dPanelRef.current?.playPresetAnimation();
+  // 预设动画触发 - 现在接收音频数据用于同步播放
+  const handlePresetAnimationTrigger = useCallback(async (audioBase64: string) => {
+    console.log('VideoCall: Triggering preset animation with audio sync');
+    await live2dPanelRef.current?.playPresetAnimation(audioBase64);
   }, []);
 
   return (
