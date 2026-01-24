@@ -238,7 +238,10 @@ serve(async (req) => {
       // 构建带认证参数的 WebSocket URL
       // 豆包 Realtime API 需要在 URL 中传递认证信息
       const connectId = crypto.randomUUID();
-      const wsUrlWithAuth = `${DOUBAO_WS_URL}?X-Api-App-ID=${encodeURIComponent(VOLCENGINE_APP_ID)}&X-Api-Access-Key=${encodeURIComponent(VOLCENGINE_ACCESS_KEY)}&X-Api-Resource-Id=volc.speech.dialog&X-Api-Connect-Id=${connectId}`;
+      // 文档要求的必传头：X-Api-App-Key（固定值）
+      // 说明：当前运行时的 WebSocket 客户端无法在握手阶段自定义 headers，
+      // 因此这里采用 query 方式透传；若后续运行时支持 headers，应切回 headers 方式。
+      const wsUrlWithAuth = `${DOUBAO_WS_URL}?X-Api-App-ID=${encodeURIComponent(VOLCENGINE_APP_ID)}&X-Api-Access-Key=${encodeURIComponent(VOLCENGINE_ACCESS_KEY)}&X-Api-Resource-Id=volc.speech.dialog&X-Api-App-Key=PlgvMymc7f3tQnJ6&X-Api-Connect-Id=${connectId}`;
       
       console.log("Connecting to URL:", DOUBAO_WS_URL);
       
