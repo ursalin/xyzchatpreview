@@ -497,6 +497,11 @@ serve(async (req) => {
                 currentSessionId = generateSessionId();
               }
               
+              // 从客户端消息中获取语音ID，如果没有则使用默认
+              const customVoiceId = message.session?.voice;
+              const speakerVoice = customVoiceId || "zh_female_vv_jupiter_bigtts"; // 默认 vv 音色
+              console.log("Using voice:", speakerVoice, "custom:", !!customVoiceId);
+              
               const sessionConfig = {
                 asr: {
                   extra: {
@@ -514,7 +519,7 @@ serve(async (req) => {
                   }
                 },
                 tts: {
-                  speaker: "zh_female_vv_jupiter_bigtts",  // 默认 vv 音色
+                  speaker: speakerVoice,  // 使用自定义或默认音色
                   audio_config: {
                     channel: 1,
                     format: "pcm_s16le",
@@ -527,7 +532,7 @@ serve(async (req) => {
               
               if (isDoubaoConnected && doubaoSocket.readyState === WebSocket.OPEN) {
                 doubaoSocket.send(sessionFrame);
-                console.log("Sent StartSession with config");
+                console.log("Sent StartSession with config, voice:", speakerVoice);
               } else {
                 pendingMessages.push(sessionFrame);
               }
