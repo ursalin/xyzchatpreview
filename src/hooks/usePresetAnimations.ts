@@ -28,17 +28,87 @@ const BUILT_IN_ANIMATIONS: Array<{ id: string; name: string; videoUrl: string }>
 ];
 
 // 获取音频时长（毫秒）
+// 将 PCM16 base64 转换为 WAV data URL
+export function pcm16ToWavDataUrl(pcmBase64: string, sampleRate = 24000): string {
+  // 解码 base64 到 Uint8Array
+  const binaryString = atob(pcmBase64);
+  const pcmData = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    pcmData[i] = binaryString.charCodeAt(i);
+  }
+
+  // 创建 WAV 头
+  const numChannels = 1;
+  const bitsPerSample = 16;
+  const blockAlign = (numChannels * bitsPerSample) / 8;
+  const byteRate = sampleRate * blockAlign;
+  const dataSize = pcmData.length;
+
+  const wavHeader = new ArrayBuffer(44);
+  const view = new DataView(wavHeader);
+
+  const writeString = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  };
+
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  writeString(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  // 合并头和数据
+  const wavArray = new Uint8Array(44 + dataSize);
+  wavArray.set(new Uint8Array(wavHeader), 0);
+  wavArray.set(pcmData, 44);
+
+  // 转回 base64
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < wavArray.length; i += chunkSize) {
+    const chunk = wavArray.subarray(i, Math.min(i + chunkSize, wavArray.length));
+    binary += String.fromCharCode.apply(null, Array.from(chunk));
+  }
+  return `data:audio/wav;base64,${btoa(binary)}`;
+}
+
+// 检测音频格式并返回正确的 data URL
+function getAudioDataUrl(audioBase64: string): string {
+  // 尝试检测格式：MP3 以 'SUQ' 或 '//' 开头，WAV 以 'UklG' 开头
+  // PCM16 原始数据没有特定头部
+  if (audioBase64.startsWith('SUQ') || audioBase64.startsWith('//')) {
+    return `data:audio/mpeg;base64,${audioBase64}`;
+  } else if (audioBase64.startsWith('UklG')) {
+    return `data:audio/wav;base64,${audioBase64}`;
+  } else {
+    // 假设是 PCM16 原始数据，转换为 WAV
+    console.log('Detected PCM16 audio, converting to WAV...');
+    return pcm16ToWavDataUrl(audioBase64);
+  }
+}
+
+// 获取音频时长（毫秒）- 支持多种格式
 export function getAudioDuration(audioBase64: string): Promise<number> {
   return new Promise((resolve) => {
-    const audioUrl = `data:audio/mpeg;base64,${audioBase64}`;
+    const audioUrl = getAudioDataUrl(audioBase64);
     const audio = new Audio();
     
     audio.onloadedmetadata = () => {
       resolve(audio.duration * 1000);
     };
     
-    audio.onerror = () => {
-      console.warn('Could not get audio duration, defaulting to 3000ms');
+    audio.onerror = (e) => {
+      console.warn('Could not get audio duration:', e, 'defaulting to 3000ms');
       resolve(3000);
     };
     
@@ -216,8 +286,8 @@ export function usePresetAnimations() {
     // 2. 选择最佳动画（根据时长匹配）
     const animation = getBestAnimation(audioDurationMs) || getRandomAnimation();
     
-    // 3. 创建音频元素
-    const audioUrl = `data:audio/mpeg;base64,${audioBase64}`;
+    // 3. 创建音频元素（自动检测格式）
+    const audioUrl = getAudioDataUrl(audioBase64);
     const audio = new Audio(audioUrl);
     audioRef.current = audio;
     
