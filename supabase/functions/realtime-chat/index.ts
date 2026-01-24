@@ -235,16 +235,15 @@ serve(async (req) => {
     console.log("App ID:", VOLCENGINE_APP_ID);
 
     try {
+      // 构建带认证参数的 WebSocket URL
+      // 豆包 Realtime API 需要在 URL 中传递认证信息
+      const connectId = crypto.randomUUID();
+      const wsUrlWithAuth = `${DOUBAO_WS_URL}?X-Api-App-ID=${encodeURIComponent(VOLCENGINE_APP_ID)}&X-Api-Access-Key=${encodeURIComponent(VOLCENGINE_ACCESS_KEY)}&X-Api-Resource-Id=volc.speech.dialog&X-Api-Connect-Id=${connectId}`;
+      
+      console.log("Connecting to URL:", DOUBAO_WS_URL);
+      
       // 连接到豆包 Realtime API
-      const doubaoSocket = new WebSocket(DOUBAO_WS_URL, {
-        headers: {
-          "X-Api-App-ID": VOLCENGINE_APP_ID,
-          "X-Api-Access-Key": VOLCENGINE_ACCESS_KEY,
-          "X-Api-Resource-Id": "volc.speech.dialog",
-          "X-Api-App-Key": "PlgvMymc7f3tQnJ6",
-          "X-Api-Connect-Id": crypto.randomUUID(),
-        },
-      } as any);
+      const doubaoSocket = new WebSocket(wsUrlWithAuth);
 
       const { socket: clientSocket, response } = Deno.upgradeWebSocket(req);
       
