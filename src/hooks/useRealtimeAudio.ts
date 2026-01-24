@@ -32,18 +32,14 @@ class AudioQueue {
   }
 
   private createWavFromPCM(pcmData: Uint8Array): Uint8Array {
-    // Convert bytes to 16-bit samples (little endian)
-    const int16Data = new Int16Array(pcmData.length / 2);
-    for (let i = 0; i < pcmData.length; i += 2) {
-      int16Data[i / 2] = (pcmData[i + 1] << 8) | pcmData[i];
-    }
-    
+    // 豆包返回的是 PCM16LE (24kHz, 16bit, mono)
+    // 直接使用，不需要转换
     const sampleRate = 24000;
     const numChannels = 1;
     const bitsPerSample = 16;
     const blockAlign = (numChannels * bitsPerSample) / 8;
     const byteRate = sampleRate * blockAlign;
-    const dataSize = int16Data.byteLength;
+    const dataSize = pcmData.length;
 
     // Create WAV header (44 bytes)
     const wavHeader = new ArrayBuffer(44);
@@ -70,9 +66,9 @@ class AudioQueue {
     view.setUint32(40, dataSize, true);
 
     // Combine header and data
-    const wavArray = new Uint8Array(44 + int16Data.byteLength);
+    const wavArray = new Uint8Array(44 + dataSize);
     wavArray.set(new Uint8Array(wavHeader), 0);
-    wavArray.set(new Uint8Array(int16Data.buffer as ArrayBuffer), 44);
+    wavArray.set(pcmData, 44);
 
     return wavArray;
   }
@@ -107,12 +103,22 @@ class AudioQueue {
   }
 }
 
-export const encodeAudioForAPI = (float32Array: Float32Array): string => {
-  const int16Array = new Int16Array(float32Array.length);
-  for (let i = 0; i < float32Array.length; i++) {
-    const s = Math.max(-1, Math.min(1, float32Array[i]));
+// 豆包要求 PCM16 (16kHz, 16bit, mono, little endian)
+export const encodeAudioForAPI = (float32Array: Float32Array, targetSampleRate: number = 16000): string => {
+  // 如果输入采样率是 24kHz，需要降采样到 16kHz
+  const inputSampleRate = 24000;
+  const ratio = inputSampleRate / targetSampleRate;
+  
+  // 降采样
+  const outputLength = Math.floor(float32Array.length / ratio);
+  const int16Array = new Int16Array(outputLength);
+  
+  for (let i = 0; i < outputLength; i++) {
+    const srcIndex = Math.floor(i * ratio);
+    const s = Math.max(-1, Math.min(1, float32Array[srcIndex]));
     int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
   }
+  
   const uint8Array = new Uint8Array(int16Array.buffer);
   let binary = '';
   const chunkSize = 0x8000;
@@ -374,9 +380,10 @@ export function useRealtimeAudio(options: UseRealtimeAudioOptions = {}) {
     }
 
     try {
+      // 豆包要求 16kHz 输入
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          sampleRate: 24000,
+          sampleRate: 16000,
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
@@ -385,21 +392,38 @@ export function useRealtimeAudio(options: UseRealtimeAudioOptions = {}) {
       });
       mediaStreamRef.current = stream;
 
-      const audioContext = audioContextRef.current || new AudioContext({ sampleRate: 24000 });
+      // 录音使用 16kHz，播放仍使用 24kHz（豆包输出是 24kHz）
+      const recordingContext = new AudioContext({ sampleRate: 16000 });
+      
+      // 确保播放用的 audioContext 是 24kHz
       if (!audioContextRef.current) {
-        audioContextRef.current = audioContext;
+        audioContextRef.current = new AudioContext({ sampleRate: 24000 });
+        audioQueueRef.current = new AudioQueue(audioContextRef.current, handleSpeakingChange);
       }
 
-      const source = audioContext.createMediaStreamSource(stream);
+      const source = recordingContext.createMediaStreamSource(stream);
       sourceRef.current = source;
 
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      // 使用较小的 buffer 实现 20ms 发送间隔 (16000 * 0.02 = 320 samples)
+      const processor = recordingContext.createScriptProcessor(640, 1, 1);
       processorRef.current = processor;
 
       processor.onaudioprocess = (e) => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           const inputData = e.inputBuffer.getChannelData(0);
-          const audioBase64 = encodeAudioForAPI(new Float32Array(inputData));
+          // 直接编码，不需要降采样（已经是 16kHz）
+          const int16Array = new Int16Array(inputData.length);
+          for (let i = 0; i < inputData.length; i++) {
+            const s = Math.max(-1, Math.min(1, inputData[i]));
+            int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+          }
+          const uint8Array = new Uint8Array(int16Array.buffer);
+          let binary = '';
+          for (let i = 0; i < uint8Array.length; i++) {
+            binary += String.fromCharCode(uint8Array[i]);
+          }
+          const audioBase64 = btoa(binary);
+          
           wsRef.current.send(JSON.stringify({
             type: 'input_audio_buffer.append',
             audio: audioBase64
@@ -408,7 +432,7 @@ export function useRealtimeAudio(options: UseRealtimeAudioOptions = {}) {
       };
 
       source.connect(processor);
-      processor.connect(audioContext.destination);
+      processor.connect(recordingContext.destination);
       setIsRecording(true);
       console.log("Recording started");
     } catch (error) {
