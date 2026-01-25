@@ -259,8 +259,8 @@ serve(async (req) => {
 
       // 连接到豆包 Realtime API
       // 关键点：标准 WebSocket 构造函数在 Deno/Edge 环境里不支持传 headers（第二参会被当作 subprotocols），
-      // 这会导致 "Invalid protocol value" 并触发回退逻辑。
-      // 因此这里使用 Deno.connectWebSocket 来显式发送 headers，并把握手失败的 HTTP 状态码带回前端诊断。
+      // 因此这里优先使用 fetch 的 WebSocket Upgrade 方式来显式发送 headers。
+      // 若运行时不支持 Response.webSocket，则回退到 query 透传（通常会被上游拒绝并返回 400）。
       let doubaoSocket: WebSocket;
       const upstreamHeaders = {
         "X-Api-App-ID": VOLCENGINE_APP_ID,
@@ -278,21 +278,9 @@ serve(async (req) => {
       }
 
       try {
-        const connectWebSocket = (Deno as any).connectWebSocket as
-          | ((url: string, options?: { headers?: Record<string, string> }) => {
-              socket: WebSocket;
-              response: Response;
-            })
-          | undefined;
-
-        if (!connectWebSocket) {
-          throw new Error("connectWebSocket not available in this runtime");
-        }
-
-        const { socket, response: upstreamResp } = connectWebSocket(DOUBAO_WS_URL, {
+        const upstreamResp = await fetch(DOUBAO_WS_URL, {
           headers: upstreamHeaders,
         });
-        doubaoSocket = socket;
 
         console.log(
           "Upstream handshake status:",
@@ -300,7 +288,6 @@ serve(async (req) => {
           upstreamResp.statusText,
         );
 
-        // 非 101 说明握手未成功，通常是鉴权/资源未开通/参数错误
         if (upstreamResp.status !== 101) {
           let body = "";
           try {
@@ -308,13 +295,13 @@ serve(async (req) => {
           } catch {
             body = "";
           }
-          const bodySnippet = body ? body.slice(0, 200) : "";
-          console.error("Upstream handshake failed body:", bodySnippet);
 
+          const bodySnippet = body ? body.slice(0, 240) : "";
+          console.error("Upstream handshake failed (non-101)");
           sendProxyError(
             `上游握手失败：${upstreamResp.status} ${upstreamResp.statusText}${bodySnippet ? `；${bodySnippet}` : ""}`,
           );
-          // 立即关闭：避免前端停留在 1006
+
           try {
             clientSocket.close(1011, "Upstream handshake failed");
           } catch {
@@ -322,10 +309,20 @@ serve(async (req) => {
           }
           return response;
         }
+
+        const maybeWs = (upstreamResp as any).webSocket as WebSocket | undefined;
+        if (!maybeWs) {
+          throw new Error("Response.webSocket not available in this runtime");
+        }
+
+        doubaoSocket = maybeWs;
+        // Deno 的 fetch WebSocket upgrade 需要 accept()
+        (doubaoSocket as any).accept?.();
+        console.log("Upstream connect: using fetch upgrade with headers");
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(
-          "Upstream connect via Deno.connectWebSocket failed, falling back to query auth. reason:",
+          "Upstream connect via fetch-upgrade failed, falling back to query auth. reason:",
           msg,
         );
 
@@ -335,6 +332,7 @@ serve(async (req) => {
           `&X-Api-Resource-Id=volc.speech.dialog` +
           `&X-Api-App-Key=${encodeURIComponent(appKey)}` +
           `&X-Api-Connect-Id=${connectId}`;
+        // ⚠️ 不要 console.log(wsUrlWithAuth)（包含敏感信息）
         doubaoSocket = new WebSocket(wsUrlWithAuth);
       }
       
@@ -524,8 +522,14 @@ serve(async (req) => {
       }
 
       doubaoSocket.onerror = (event: Event) => {
-        console.error("Doubao WebSocket error:", event);
-        sendProxyError("上游 WebSocket 连接错误（可能是鉴权/资源未开通/网络问题）");
+        // 避免直接打印 event（其中可能包含带 query 的 url）
+        console.error("Doubao WebSocket error");
+        try {
+          const msg = (event as any)?.message ? String((event as any).message) : "WebSocket error";
+          sendProxyError(`上游 WebSocket 错误：${msg}`);
+        } catch {
+          sendProxyError("上游 WebSocket 连接错误（可能是鉴权/资源未开通/网络问题）");
+        }
       };
 
       doubaoSocket.onclose = (event: CloseEvent) => {
