@@ -64,8 +64,39 @@ function buildHeader(messageType: number, flags: number, isJson: boolean, compre
   return header;
 }
 
-// 构建带事件的完整消息帧
-function buildEventFrame(eventId: number, sessionId: string, payload: object | null): Uint8Array {
+// 构建 Connect 类事件帧 (StartConnection, FinishConnection)
+// 格式: Header (4) + Event ID (4) + Payload Size (4) + Payload
+// 文档示例: [17 20 16 0 0 0 0 1 0 0 0 2 123 125]
+function buildConnectEventFrame(eventId: number, payload: object | null): Uint8Array {
+  const payloadBytes = payload ? new TextEncoder().encode(JSON.stringify(payload)) : new TextEncoder().encode("{}");
+  
+  const totalSize = 4 + 4 + 4 + payloadBytes.length;
+  const frame = new Uint8Array(totalSize);
+  const view = new DataView(frame.buffer);
+  
+  let offset = 0;
+  
+  // Header: message type 0b0001 (full client request), flags 0b0100 (has event)
+  frame.set(buildHeader(MESSAGE_TYPE.FULL_CLIENT_REQUEST, 0b0100, true), offset);
+  offset += 4;
+  
+  // Event ID (4 bytes, big endian)
+  view.setUint32(offset, eventId, false);
+  offset += 4;
+  
+  // Payload size (4 bytes, big endian)
+  view.setUint32(offset, payloadBytes.length, false);
+  offset += 4;
+  
+  // Payload
+  frame.set(payloadBytes, offset);
+  
+  return frame;
+}
+
+// 构建 Session 类事件帧 (StartSession, FinishSession, etc.)
+// 格式: Header (4) + Event ID (4) + Session ID Size (4) + Session ID + Payload Size (4) + Payload
+function buildSessionEventFrame(eventId: number, sessionId: string, payload: object | null): Uint8Array {
   const sessionIdBytes = new TextEncoder().encode(sessionId);
   const payloadBytes = payload ? new TextEncoder().encode(JSON.stringify(payload)) : new TextEncoder().encode("{}");
   
@@ -354,11 +385,11 @@ serve(async (req) => {
         console.log("Connected to Doubao Realtime API");
         isDoubaoConnected = true;
 
-        // 发送 StartConnection 事件
-        // 严格遵循文档示例：header + eventId + payloadSize + payload（不携带 connect-id 字段）
-        const startConnectionFrame = buildEventFrame(EVENT_ID.START_CONNECTION, "", {});
+        // 发送 StartConnection 事件 (Connect 类事件，不需要 Session ID)
+        // 严格遵循文档示例：header + eventId + payloadSize + payload
+        const startConnectionFrame = buildConnectEventFrame(EVENT_ID.START_CONNECTION, {});
         doubaoSocket.send(startConnectionFrame);
-        console.log("Sent StartConnection event");
+        console.log("Sent StartConnection event (Connect-level, no session ID)");
         
         // 发送队列中的消息
         for (const msg of pendingMessages) {
@@ -588,7 +619,7 @@ serve(async (req) => {
                 }
               };
               
-              const sessionFrame = buildEventFrame(EVENT_ID.START_SESSION, currentSessionId, sessionConfig);
+              const sessionFrame = buildSessionEventFrame(EVENT_ID.START_SESSION, currentSessionId, sessionConfig);
               
               if (isDoubaoConnected && doubaoSocket.readyState === WebSocket.OPEN) {
                 doubaoSocket.send(sessionFrame);
@@ -623,7 +654,7 @@ serve(async (req) => {
                 const textQuery = {
                   content: message.item.content[0].text
                 };
-                const textFrame = buildEventFrame(EVENT_ID.CHAT_TEXT_QUERY, currentSessionId, textQuery);
+                const textFrame = buildSessionEventFrame(EVENT_ID.CHAT_TEXT_QUERY, currentSessionId, textQuery);
                 
                 if (isDoubaoConnected && doubaoSocket.readyState === WebSocket.OPEN) {
                   doubaoSocket.send(textFrame);
@@ -654,7 +685,7 @@ serve(async (req) => {
         
         // 结束会话
         if (currentSessionId && doubaoSocket.readyState === WebSocket.OPEN) {
-          const finishSessionFrame = buildEventFrame(EVENT_ID.FINISH_SESSION, currentSessionId, {});
+          const finishSessionFrame = buildSessionEventFrame(EVENT_ID.FINISH_SESSION, currentSessionId, {});
           doubaoSocket.send(finishSessionFrame);
         }
         
