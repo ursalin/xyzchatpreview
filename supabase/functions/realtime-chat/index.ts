@@ -312,14 +312,20 @@ serve(async (req) => {
       console.log("Using X-Api headers auth, headers configured");
 
       try {
-        // 关键：用 https 触发 fetch-upgrade，并携带 Upgrade/Connection 头，确保自定义鉴权 headers 生效
-        const upstreamResp = await fetch(DOUBAO_HTTP_URL, {
-          headers: {
-            ...upstreamHeaders,
-            "Upgrade": "websocket",
-            "Connection": "Upgrade",
-          },
-        });
+        // ✅ 正确方式：使用 Deno.connectWebSocket 以发送标准 WS 握手，同时允许携带自定义鉴权 headers。
+        // 之前用 fetch 模拟 upgrade 会遇到 hop-by-hop headers（Connection/Upgrade）被运行时剥离，导致上游 400。
+        const connectWebSocket = (Deno as any).connectWebSocket as
+          | ((url: string, options?: { headers?: Record<string, string> }) => Promise<{ socket: WebSocket; response: Response }>)
+          | undefined;
+
+        if (!connectWebSocket) {
+          throw new Error("Deno.connectWebSocket not available in this runtime");
+        }
+
+        const { socket: upstreamSocket, response: upstreamResp } = await connectWebSocket(
+          DOUBAO_WS_URL,
+          { headers: upstreamHeaders },
+        );
 
         console.log(
           "Upstream handshake status:",
@@ -335,9 +341,7 @@ serve(async (req) => {
             body = "";
           }
 
-          // 打印完整响应体用于调试
           console.error("Upstream handshake failed body:", body);
-          
           const bodySnippet = body ? body.slice(0, 500) : "";
           console.error("Upstream handshake failed (non-101)");
           sendProxyError(
@@ -352,19 +356,12 @@ serve(async (req) => {
           return response;
         }
 
-        const maybeWs = (upstreamResp as any).webSocket as WebSocket | undefined;
-        if (!maybeWs) {
-          throw new Error("Response.webSocket not available in this runtime");
-        }
-
-        doubaoSocket = maybeWs;
-        // Deno 的 fetch WebSocket upgrade 需要 accept()
-        (doubaoSocket as any).accept?.();
-        console.log("Upstream connect: using fetch upgrade with headers");
+        doubaoSocket = upstreamSocket;
+        console.log("Upstream connect: using Deno.connectWebSocket with headers");
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(
-          "Upstream connect via fetch-upgrade failed, falling back to query auth. reason:",
+          "Upstream connect via Deno.connectWebSocket failed, falling back to query auth. reason:",
           msg,
         );
 
