@@ -258,8 +258,9 @@ serve(async (req) => {
       console.log("Connecting to URL:", DOUBAO_WS_URL);
 
       // 连接到豆包 Realtime API
-      // 注意：Edge Runtime 的 WebSocket 类型声明不包含 headers 选项，但部分运行时实际支持。
-      // 我们优先尝试 headers 鉴权；若运行时不支持，则回退到 query 透传（可能被网关拒绝，出现 400）。
+      // 关键点：标准 WebSocket 构造函数在 Deno/Edge 环境里不支持传 headers（第二参会被当作 subprotocols），
+      // 这会导致 "Invalid protocol value" 并触发回退逻辑。
+      // 因此这里使用 Deno.connectWebSocket 来显式发送 headers，并把握手失败的 HTTP 状态码带回前端诊断。
       let doubaoSocket: WebSocket;
       const upstreamHeaders = {
         "X-Api-App-ID": VOLCENGINE_APP_ID,
@@ -269,14 +270,71 @@ serve(async (req) => {
         "X-Api-Connect-Id": connectId,
       };
 
+      // 额外提示：若 AK/SK 配置错，经常会直接 400
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(VOLCENGINE_ACCESS_KEY)) {
+        console.warn(
+          "VOLCENGINE_ACCESS_KEY looks like a UUID. Volcengine AK usually starts with 'AK'. Please verify credentials.",
+        );
+      }
+
       try {
-        doubaoSocket = new (WebSocket as any)(DOUBAO_WS_URL, { headers: upstreamHeaders });
-        console.log("Upstream connect: using headers auth");
+        const connectWebSocket = (Deno as any).connectWebSocket as
+          | ((url: string, options?: { headers?: Record<string, string> }) => {
+              socket: WebSocket;
+              response: Response;
+            })
+          | undefined;
+
+        if (!connectWebSocket) {
+          throw new Error("connectWebSocket not available in this runtime");
+        }
+
+        const { socket, response: upstreamResp } = connectWebSocket(DOUBAO_WS_URL, {
+          headers: upstreamHeaders,
+        });
+        doubaoSocket = socket;
+
+        console.log(
+          "Upstream handshake status:",
+          upstreamResp.status,
+          upstreamResp.statusText,
+        );
+
+        // 非 101 说明握手未成功，通常是鉴权/资源未开通/参数错误
+        if (upstreamResp.status !== 101) {
+          let body = "";
+          try {
+            body = await upstreamResp.text();
+          } catch {
+            body = "";
+          }
+          const bodySnippet = body ? body.slice(0, 200) : "";
+          console.error("Upstream handshake failed body:", bodySnippet);
+
+          sendProxyError(
+            `上游握手失败：${upstreamResp.status} ${upstreamResp.statusText}${bodySnippet ? `；${bodySnippet}` : ""}`,
+          );
+          // 立即关闭：避免前端停留在 1006
+          try {
+            clientSocket.close(1011, "Upstream handshake failed");
+          } catch {
+            // ignore
+          }
+          return response;
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn("Upstream connect: headers not supported, falling back to query auth. reason:", msg);
+        console.warn(
+          "Upstream connect via Deno.connectWebSocket failed, falling back to query auth. reason:",
+          msg,
+        );
 
-        const wsUrlWithAuth = `${DOUBAO_WS_URL}?X-Api-App-ID=${encodeURIComponent(VOLCENGINE_APP_ID)}&X-Api-Access-Key=${encodeURIComponent(VOLCENGINE_ACCESS_KEY)}&X-Api-Resource-Id=volc.speech.dialog&X-Api-App-Key=${encodeURIComponent(appKey)}&X-Api-Connect-Id=${connectId}`;
+        const wsUrlWithAuth =
+          `${DOUBAO_WS_URL}?X-Api-App-ID=${encodeURIComponent(VOLCENGINE_APP_ID)}` +
+          `&X-Api-Access-Key=${encodeURIComponent(VOLCENGINE_ACCESS_KEY)}` +
+          `&X-Api-Resource-Id=volc.speech.dialog` +
+          `&X-Api-App-Key=${encodeURIComponent(appKey)}` +
+          `&X-Api-Connect-Id=${connectId}`;
         doubaoSocket = new WebSocket(wsUrlWithAuth);
       }
       
