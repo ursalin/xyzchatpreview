@@ -7,7 +7,10 @@ const corsHeaders = {
 };
 
 // 豆包 Realtime API 常量
+// 注意：在 Deno/Edge 环境里，若需要在握手时携带自定义 Headers，
+// 通常要用 fetch("https://...", { headers: { Upgrade: "websocket" } }) 来拿到 response.webSocket。
 const DOUBAO_WS_URL = "wss://openspeech.bytedance.com/api/v3/realtime/dialogue";
+const DOUBAO_HTTP_URL = "https://openspeech.bytedance.com/api/v3/realtime/dialogue";
 
 // 事件ID定义
 const EVENT_ID = {
@@ -239,7 +242,7 @@ serve(async (req) => {
     // VOLCENGINE_APP_KEY 现在存储的是 Access Token，用于 Bearer 认证
     const accessToken = VOLCENGINE_APP_KEY;
 
-    console.log("Connecting to Doubao Realtime API with Bearer Token auth...");
+    console.log("Connecting to Doubao Realtime API...");
     console.log("App ID length:", VOLCENGINE_APP_ID.length);
     console.log("Access Token length:", accessToken.length);
     console.log("Access Token prefix:", accessToken.substring(0, 8) + "...");
@@ -278,8 +281,13 @@ serve(async (req) => {
       console.log("Using X-Api headers auth, headers configured");
 
       try {
-        const upstreamResp = await fetch(DOUBAO_WS_URL, {
-          headers: upstreamHeaders,
+        // 关键：用 https 触发 fetch-upgrade，并携带 Upgrade/Connection 头，确保自定义鉴权 headers 生效
+        const upstreamResp = await fetch(DOUBAO_HTTP_URL, {
+          headers: {
+            ...upstreamHeaders,
+            "Upgrade": "websocket",
+            "Connection": "Upgrade",
+          },
         });
 
         console.log(
@@ -322,7 +330,7 @@ serve(async (req) => {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(
-          "Upstream connect via fetch-upgrade failed, falling back to query auth with Bearer token. reason:",
+          "Upstream connect via fetch-upgrade failed, falling back to query auth. reason:",
           msg,
         );
 
@@ -340,63 +348,16 @@ serve(async (req) => {
       let isDoubaoConnected = false;
       let currentSessionId = "";
       const pendingMessages: Uint8Array[] = [];
-      let pingInterval: number | undefined;
-      
-      // 清理心跳定时器
-      const clearPingInterval = () => {
-        if (pingInterval) {
-          clearInterval(pingInterval);
-          pingInterval = undefined;
-        }
-      };
 
       // 处理豆包连接
       doubaoSocket.onopen = () => {
         console.log("Connected to Doubao Realtime API");
         isDoubaoConnected = true;
-        
-        // 🔧 启动心跳机制 - 每15秒发送一次 ping 保持连接活跃
-        pingInterval = setInterval(() => {
-          if (doubaoSocket.readyState === WebSocket.OPEN) {
-            // 豆包可能需要特定格式的 ping，这里使用标准 JSON ping
-            try {
-              // 构建一个空的 TASK_REQUEST 作为心跳（豆包协议兼容）
-              const pingPayload = new TextEncoder().encode("{}");
-              const header = buildHeader(MESSAGE_TYPE.FULL_CLIENT_REQUEST, 0b0000, true);
-              const frame = new Uint8Array(4 + 4 + pingPayload.length);
-              const view = new DataView(frame.buffer);
-              frame.set(header, 0);
-              view.setUint32(4, pingPayload.length, false);
-              frame.set(pingPayload, 8);
-              doubaoSocket.send(frame);
-              console.log("Sent ping keepalive");
-            } catch (e) {
-              console.error("Failed to send ping:", e);
-            }
-          }
-        }, 15000) as unknown as number;
-        
+
         // 发送 StartConnection 事件
+        // 严格遵循文档示例：header + eventId + payloadSize + payload（不携带 connect-id 字段）
         const startConnectionFrame = buildEventFrame(EVENT_ID.START_CONNECTION, "", {});
-        // 重新构建 StartConnection 帧（不需要 session id）
-        const header = buildHeader(MESSAGE_TYPE.FULL_CLIENT_REQUEST, 0b0100, true);
-        const eventBytes = new Uint8Array(4);
-        new DataView(eventBytes.buffer).setUint32(0, EVENT_ID.START_CONNECTION, false);
-        const connectIdBytes = new TextEncoder().encode(crypto.randomUUID());
-        const payloadBytes = new TextEncoder().encode("{}");
-        
-        const frame = new Uint8Array(4 + 4 + 4 + connectIdBytes.length + 4 + payloadBytes.length);
-        const view = new DataView(frame.buffer);
-        let offset = 0;
-        
-        frame.set(header, offset); offset += 4;
-        view.setUint32(offset, EVENT_ID.START_CONNECTION, false); offset += 4;
-        view.setUint32(offset, connectIdBytes.length, false); offset += 4;
-        frame.set(connectIdBytes, offset); offset += connectIdBytes.length;
-        view.setUint32(offset, payloadBytes.length, false); offset += 4;
-        frame.set(payloadBytes, offset);
-        
-        doubaoSocket.send(frame);
+        doubaoSocket.send(startConnectionFrame);
         console.log("Sent StartConnection event");
         
         // 发送队列中的消息
@@ -564,7 +525,6 @@ serve(async (req) => {
 
       doubaoSocket.onclose = (event: CloseEvent) => {
         console.log("Doubao WebSocket closed:", event.code, event.reason);
-        clearPingInterval(); // 清理心跳定时器
         if (clientSocket.readyState === WebSocket.OPEN) {
           clientSocket.send(JSON.stringify({
             type: "proxy.closed",
@@ -613,6 +573,8 @@ serve(async (req) => {
                   speaking_style: "温柔亲切",
                   extra: {
                     strict_audit: false,
+                    // 静音/间歇时保活（文档建议：静音按键/不发音频时用 keep_alive 防止 10s 超时）
+                    input_mod: "keep_alive",
                     model: "O"  // 使用 O 版本
                   }
                 },
@@ -689,7 +651,6 @@ serve(async (req) => {
 
       clientSocket.onclose = (event) => {
         console.log("Client WebSocket closed:", event.code, event.reason);
-        clearPingInterval(); // 清理心跳定时器
         
         // 结束会话
         if (currentSessionId && doubaoSocket.readyState === WebSocket.OPEN) {
