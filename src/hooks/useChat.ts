@@ -1,9 +1,59 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Message, AppSettings } from '@/types/chat';
 
+const CHAT_HISTORY_KEY = 'ai-companion-chat-history';
+const MAX_STORED_MESSAGES = 100; // 最多保存100条消息
+
+// 序列化消息用于存储
+function serializeMessages(messages: Message[]): string {
+  return JSON.stringify(messages.map(m => ({
+    ...m,
+    timestamp: m.timestamp.toISOString(),
+  })));
+}
+
+// 反序列化存储的消息
+function deserializeMessages(data: string): Message[] {
+  try {
+    const parsed = JSON.parse(data);
+    return parsed.map((m: { id: string; role: 'user' | 'assistant'; content: string; timestamp: string }) => ({
+      ...m,
+      timestamp: new Date(m.timestamp),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// 从 localStorage 加载聊天记录
+function loadStoredMessages(): Message[] {
+  try {
+    const stored = localStorage.getItem(CHAT_HISTORY_KEY);
+    if (stored) {
+      return deserializeMessages(stored);
+    }
+  } catch (e) {
+    console.error('Failed to load chat history:', e);
+  }
+  return [];
+}
+
 export function useChat(settings: AppSettings, systemPrompt: string) {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(() => loadStoredMessages());
   const [isLoading, setIsLoading] = useState(false);
+
+  // 保存聊天记录到 localStorage
+  useEffect(() => {
+    if (messages.length > 0) {
+      try {
+        // 只保存最近的消息
+        const messagesToStore = messages.slice(-MAX_STORED_MESSAGES);
+        localStorage.setItem(CHAT_HISTORY_KEY, serializeMessages(messagesToStore));
+      } catch (e) {
+        console.error('Failed to save chat history:', e);
+      }
+    }
+  }, [messages]);
 
   const sendMessage = useCallback(async (content: string) => {
     const userMessage: Message = {
@@ -150,6 +200,11 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
 
   const clearMessages = useCallback(() => {
     setMessages([]);
+    try {
+      localStorage.removeItem(CHAT_HISTORY_KEY);
+    } catch (e) {
+      console.error('Failed to clear chat history:', e);
+    }
   }, []);
 
   return {
