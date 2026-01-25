@@ -335,7 +335,10 @@ serve(async (req) => {
             body = "";
           }
 
-          const bodySnippet = body ? body.slice(0, 240) : "";
+          // 打印完整响应体用于调试
+          console.error("Upstream handshake failed body:", body);
+          
+          const bodySnippet = body ? body.slice(0, 500) : "";
           console.error("Upstream handshake failed (non-101)");
           sendProxyError(
             `上游握手失败：${upstreamResp.status} ${upstreamResp.statusText}${bodySnippet ? `；${bodySnippet}` : ""}`,
