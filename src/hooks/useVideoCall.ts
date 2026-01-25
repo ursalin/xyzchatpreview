@@ -15,6 +15,8 @@ interface LipsyncCacheEntry {
 const CACHE_EXPIRY_MS = 60 * 60 * 1000; // 1小时过期
 const CACHE_KEY = 'lipsync_video_cache';
 const MAX_CACHE_ENTRIES = 20;
+const CHAT_HISTORY_KEY = 'ai-companion-chat-history';
+const MAX_STORED_MESSAGES = 100;
 
 // 简单的文本哈希函数
 function hashText(text: string): string {
@@ -71,6 +73,41 @@ function cleanExpiredCache(cache: Map<string, LipsyncCacheEntry>): Map<string, L
   return new Map(valid);
 }
 
+// 序列化消息用于存储
+function serializeMessages(messages: Message[]): string {
+  return JSON.stringify(messages.map(m => ({
+    ...m,
+    timestamp: m.timestamp.toISOString(),
+  })));
+}
+
+// 反序列化存储的消息
+function deserializeMessages(data: string): Message[] {
+  try {
+    const parsed = JSON.parse(data);
+    return parsed.map((m: { id: string; role: 'user' | 'assistant'; content: string; timestamp: string }) => ({
+      ...m,
+      timestamp: new Date(m.timestamp),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// 从 localStorage 加载聊天记录
+function loadStoredMessages(): Message[] {
+  try {
+    const stored = localStorage.getItem(CHAT_HISTORY_KEY);
+    if (stored) {
+      console.log('Loaded chat history from localStorage');
+      return deserializeMessages(stored);
+    }
+  } catch (e) {
+    console.error('Failed to load chat history:', e);
+  }
+  return [];
+}
+
 interface UseVideoCallOptions {
   settings: AppSettings;
   systemPrompt: string;
@@ -80,7 +117,7 @@ interface UseVideoCallOptions {
 }
 
 export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsyncVideoReady, onPresetAnimationTrigger }: UseVideoCallOptions) {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(() => loadStoredMessages());
   const [isLoading, setIsLoading] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -95,6 +132,18 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
   const chunksRef = useRef<Blob[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const lipsyncCacheRef = useRef<Map<string, LipsyncCacheEntry>>(loadCache());
+
+  // 保存聊天记录到 localStorage
+  useEffect(() => {
+    if (messages.length > 0) {
+      try {
+        const messagesToStore = messages.slice(-MAX_STORED_MESSAGES);
+        localStorage.setItem(CHAT_HISTORY_KEY, serializeMessages(messagesToStore));
+      } catch (e) {
+        console.error('Failed to save chat history:', e);
+      }
+    }
+  }, [messages]);
 
   // 通知父组件说话状态变化
   useEffect(() => {
@@ -673,6 +722,11 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
   // 清除消息
   const clearMessages = useCallback(() => {
     setMessages([]);
+    try {
+      localStorage.removeItem(CHAT_HISTORY_KEY);
+    } catch (e) {
+      console.error('Failed to clear chat history:', e);
+    }
   }, []);
 
   // 清理
