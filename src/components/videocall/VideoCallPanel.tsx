@@ -42,15 +42,25 @@ const VideoCallPanel: React.FC<VideoCallPanelProps> = ({
   const [input, setInput] = useState('');
   const [isInCall, setIsInCall] = useState(false);
 
+  // 获取当前时间信息
+  const now = new Date();
+  const timeString = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  const dateString = now.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
+  const hour = now.getHours();
+  const timeOfDay = hour < 6 ? '凌晨' : hour < 9 ? '早上' : hour < 12 ? '上午' : hour < 14 ? '中午' : hour < 18 ? '下午' : hour < 22 ? '晚上' : '深夜';
+
   const systemPrompt = `你是${settings.character.name}，${settings.character.persona}。
 背景：${settings.character.background}
 说话风格：${settings.character.speakingStyle}
+
+当前时间：${dateString} ${timeString}（${timeOfDay}）
 
 你现在正在和用户进行视频通话。你可以看见用户的实时画面。请像真正的视频通话一样自然交流：
 - 观察用户的表情、动作、环境并自然回应
 - 语气亲切自然，像朋友间的视频聊天
 - 回复简洁有趣，适合口语交流
-- 可以对看到的画面做出反应和评论`;
+- 可以对看到的画面做出反应和评论
+- 你能感知当前时间，可以根据时间自然地打招呼或做出相应评论（如早上好、该吃饭了、这么晚还没睡等）`;
 
   const {
     messages,
