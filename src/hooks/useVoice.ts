@@ -52,12 +52,41 @@ export function useVoice(voiceConfig: VoiceConfig) {
       
       if (data.audioContent) {
         const audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
-        const audio = new Audio(audioUrl);
+        const audio = new Audio();
         audioRef.current = audio;
+        
+        // 移动端兼容性设置
+        audio.preload = 'auto';
+        (audio as any).playsInline = true;
+        (audio as any).webkitPlaysInline = true;
         
         audio.onplay = () => setIsPlaying(true);
         audio.onended = () => setIsPlaying(false);
-        audio.onerror = () => setIsPlaying(false);
+        audio.onerror = (e) => {
+          console.error('Audio playback error:', e);
+          setIsPlaying(false);
+        };
+        
+        // 先设置 src，等待可以播放
+        audio.src = audioUrl;
+        
+        // 移动端需要等待 canplaythrough 事件
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            console.warn('Audio load timeout, trying to play anyway');
+            resolve();
+          }, 3000);
+          
+          audio.oncanplaythrough = () => {
+            clearTimeout(timeout);
+            resolve();
+          };
+          audio.onerror = () => {
+            clearTimeout(timeout);
+            reject(new Error('Audio load failed'));
+          };
+          audio.load();
+        });
         
         await audio.play();
       }

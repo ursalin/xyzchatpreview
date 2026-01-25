@@ -286,9 +286,13 @@ export function usePresetAnimations() {
     // 2. 选择最佳动画（根据时长匹配）
     const animation = getBestAnimation(audioDurationMs) || getRandomAnimation();
     
-    // 3. 创建音频元素（自动检测格式）
+    // 3. 创建音频元素（自动检测格式）- 移动端兼容
     const audioUrl = getAudioDataUrl(audioBase64);
-    const audio = new Audio(audioUrl);
+    const audio = new Audio();
+    audio.preload = 'auto';
+    (audio as any).playsInline = true;
+    (audio as any).webkitPlaysInline = true;
+    audio.src = audioUrl;
     audioRef.current = audio;
     
     // 如果没有预设动画，只播放音频
@@ -302,6 +306,12 @@ export function usePresetAnimations() {
         setIsPlaying(false);
         onEnd?.();
       };
+      // 等待音频加载完成
+      await new Promise<void>((resolve) => {
+        const timeout = setTimeout(resolve, 2000);
+        audio.oncanplaythrough = () => { clearTimeout(timeout); resolve(); };
+        audio.load();
+      });
       await audio.play();
       return;
     }
