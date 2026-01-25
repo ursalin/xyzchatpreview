@@ -96,8 +96,7 @@ const VideoCallPanel: React.FC<VideoCallPanelProps> = ({
       const success = await startCamera(userVideoRef.current);
       if (success) {
         setIsInCall(true);
-        // 发送开场白
-        await sendMessage("你好！我们开始视频通话吧。", true);
+        // 不再自动发送开场白，让用户自己开始对话
       }
     }
   };
