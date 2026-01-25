@@ -47,12 +47,16 @@ function generateSessionId(): string {
   return crypto.randomUUID();
 }
 
-// 构建二进制协议头
+// 构建二进制协议头 - 火山引擎 V1 协议
+// 第0字节: 0x11 = 协议版本 V1 (高4位=1) + Header长度 4字节 (低4位=1)
+// 第1字节: 消息类型 (高4位) + flags (低4位)
+// 第2字节: 序列化方式 (高4位: JSON=0x1) + 压缩方式 (低4位)
+// 第3字节: 保留位 0x00
 function buildHeader(messageType: number, flags: number, isJson: boolean, compressed: boolean = false): Uint8Array {
   const header = new Uint8Array(4);
-  header[0] = (0b0001 << 4) | 0b0001; // Protocol version 1, header size 1 (4 bytes)
+  header[0] = 0x11; // 火山引擎协议: 版本1 + 4字节header
   header[1] = (messageType << 4) | flags;
-  header[2] = (isJson ? 0b0001 : 0b0000) << 4 | (compressed ? 0b0001 : 0b0000);
+  header[2] = (isJson ? 0x10 : 0x00) | (compressed ? 0x01 : 0x00); // JSON = 0x10
   header[3] = 0x00; // Reserved
   return header;
 }
@@ -257,17 +261,21 @@ serve(async (req) => {
       console.log("Connecting to URL:", DOUBAO_WS_URL);
 
       // 连接到豆包 Realtime API
-      // 使用 Bearer Token 认证方式（火山引擎语音 API 标准认证）
-      // Header 格式: "Authorization": "Bearer; {token}"
+      // 火山引擎端到端语音 API 握手 Headers:
+      // - X-Api-App-ID: 你的 AppID (以4开头的数字ID)
+      // - X-Api-Access-Key: 你的 Access Token
+      // - X-Api-Resource-Id: 固定值 volc.speech.dialog
+      // - X-Api-App-Key: 固定值 PlgvMymc7f3tQnJ6
       let doubaoSocket: WebSocket;
       const upstreamHeaders: Record<string, string> = {
-        "Authorization": `Bearer; ${accessToken}`,
         "X-Api-App-ID": VOLCENGINE_APP_ID,
+        "X-Api-Access-Key": accessToken,
         "X-Api-Resource-Id": "volc.speech.dialog",
+        "X-Api-App-Key": "PlgvMymc7f3tQnJ6",
         "X-Api-Connect-Id": connectId,
       };
       
-      console.log("Using Bearer Token auth, headers configured");
+      console.log("Using X-Api headers auth, headers configured");
 
       try {
         const upstreamResp = await fetch(DOUBAO_WS_URL, {
@@ -318,11 +326,12 @@ serve(async (req) => {
           msg,
         );
 
-        // 回退：使用 query 参数传递认证信息（Bearer Token 方式）
+        // 回退：使用 query 参数传递认证信息（火山引擎格式）
         const wsUrlWithAuth =
           `${DOUBAO_WS_URL}?X-Api-App-ID=${encodeURIComponent(VOLCENGINE_APP_ID)}` +
-          `&Authorization=${encodeURIComponent(`Bearer; ${accessToken}`)}` +
+          `&X-Api-Access-Key=${encodeURIComponent(accessToken)}` +
           `&X-Api-Resource-Id=volc.speech.dialog` +
+          `&X-Api-App-Key=PlgvMymc7f3tQnJ6` +
           `&X-Api-Connect-Id=${connectId}`;
         // ⚠️ 不要 console.log(wsUrlWithAuth)（包含敏感信息）
         doubaoSocket = new WebSocket(wsUrlWithAuth);
