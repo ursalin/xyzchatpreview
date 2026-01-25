@@ -225,16 +225,21 @@ serve(async (req) => {
     
     const VOLCENGINE_APP_ID = Deno.env.get("VOLCENGINE_APP_ID");
     const VOLCENGINE_ACCESS_KEY = Deno.env.get("VOLCENGINE_ACCESS_KEY");
+    const VOLCENGINE_APP_KEY = Deno.env.get("VOLCENGINE_APP_KEY");
     
     if (!VOLCENGINE_APP_ID || !VOLCENGINE_ACCESS_KEY) {
       console.error("Missing Volcengine credentials");
       return new Response("Missing API credentials", { status: 500 });
     }
+    
+    // 如果没有配置 App Key，使用默认值（向后兼容）
+    const appKey = VOLCENGINE_APP_KEY || "PlgvMymc7f3tQnJ6";
 
     console.log("Connecting to Doubao Realtime API...");
     // 不打印明文凭证，避免泄漏；仅打印长度用于排查
     console.log("App ID length:", VOLCENGINE_APP_ID.length);
     console.log("Access key length:", VOLCENGINE_ACCESS_KEY.length);
+    console.log("App Key configured:", !!VOLCENGINE_APP_KEY);
 
     try {
       const connectId = crypto.randomUUID();
@@ -260,7 +265,7 @@ serve(async (req) => {
         "X-Api-App-ID": VOLCENGINE_APP_ID,
         "X-Api-Access-Key": VOLCENGINE_ACCESS_KEY,
         "X-Api-Resource-Id": "volc.speech.dialog",
-        "X-Api-App-Key": "PlgvMymc7f3tQnJ6",
+        "X-Api-App-Key": appKey,
         "X-Api-Connect-Id": connectId,
       };
 
@@ -271,7 +276,7 @@ serve(async (req) => {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn("Upstream connect: headers not supported, falling back to query auth. reason:", msg);
 
-        const wsUrlWithAuth = `${DOUBAO_WS_URL}?X-Api-App-ID=${encodeURIComponent(VOLCENGINE_APP_ID)}&X-Api-Access-Key=${encodeURIComponent(VOLCENGINE_ACCESS_KEY)}&X-Api-Resource-Id=volc.speech.dialog&X-Api-App-Key=PlgvMymc7f3tQnJ6&X-Api-Connect-Id=${connectId}`;
+        const wsUrlWithAuth = `${DOUBAO_WS_URL}?X-Api-App-ID=${encodeURIComponent(VOLCENGINE_APP_ID)}&X-Api-Access-Key=${encodeURIComponent(VOLCENGINE_ACCESS_KEY)}&X-Api-Resource-Id=volc.speech.dialog&X-Api-App-Key=${encodeURIComponent(appKey)}&X-Api-Connect-Id=${connectId}`;
         doubaoSocket = new WebSocket(wsUrlWithAuth);
       }
       
