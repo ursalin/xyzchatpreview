@@ -12,6 +12,137 @@ const corsHeaders = {
 const DOUBAO_WS_URL = "wss://openspeech.bytedance.com/api/v3/realtime/dialogue";
 const DOUBAO_HTTP_URL = "https://openspeech.bytedance.com/api/v3/realtime/dialogue";
 
+// 说明：当前 Edge Runtime 中 Deno.connectWebSocket 可能不可用；
+// fetch 手动设置 Upgrade/Connection 会被剥离（hop-by-hop headers），导致上游 400。
+// 因此优先使用 WebSocketStream（支持自定义 headers）连接上游。
+
+type UpstreamSocket = {
+  readyState: number;
+  send: (data: Uint8Array) => void;
+  close: (code?: number, reason?: string) => void;
+  onopen: ((ev?: Event) => void) | null;
+  onmessage: ((ev: MessageEvent) => void) | null;
+  onclose: ((ev: CloseEvent) => void) | null;
+  onerror: ((ev: Event) => void) | null;
+};
+
+class WebSocketStreamAdapter implements UpstreamSocket {
+  readyState = WebSocket.CONNECTING;
+  onopen: ((ev?: Event) => void) | null = null;
+  onmessage: ((ev: MessageEvent) => void) | null = null;
+  onclose: ((ev: CloseEvent) => void) | null = null;
+  onerror: ((ev: Event) => void) | null = null;
+
+  private stream: any;
+  private writer: WritableStreamDefaultWriter<Uint8Array> | null = null;
+  private closedFired = false;
+
+  constructor(url: string, headers: Record<string, string>) {
+    const WSStream = (globalThis as any).WebSocketStream;
+    if (!WSStream) {
+      throw new Error("WebSocketStream not available in this runtime");
+    }
+
+    this.stream = new WSStream(url, { headers });
+
+    this.stream.opened
+      .then(({ readable, writable }: any) => {
+        this.writer = writable.getWriter();
+        this.readyState = WebSocket.OPEN;
+        try {
+          this.onopen?.(new Event("open"));
+        } catch {
+          // ignore
+        }
+        this.pump(readable);
+      })
+      .catch((err: unknown) => {
+        this.readyState = WebSocket.CLOSED;
+        const e = Object.assign(new Event("error"), {
+          message: err instanceof Error ? err.message : String(err),
+        });
+        try {
+          this.onerror?.(e);
+        } catch {
+          // ignore
+        }
+        this.fireClose(1006, "upstream open failed");
+      });
+
+    this.stream.closed
+      .then((info: any) => {
+        const code = typeof info?.closeCode === "number" ? info.closeCode : 1000;
+        const reason = typeof info?.reason === "string" ? info.reason : "";
+        this.readyState = WebSocket.CLOSED;
+        this.fireClose(code, reason);
+      })
+      .catch(() => {
+        this.readyState = WebSocket.CLOSED;
+        this.fireClose(1006, "upstream closed");
+      });
+  }
+
+  send(data: Uint8Array) {
+    if (this.readyState !== WebSocket.OPEN || !this.writer) {
+      throw new Error("Upstream not open");
+    }
+    void this.writer.write(data);
+  }
+
+  close(code: number = 1000, reason: string = "") {
+    try {
+      this.readyState = WebSocket.CLOSING;
+      this.stream.close({ closeCode: code, reason });
+    } catch {
+      // ignore
+    }
+  }
+
+  private fireClose(code: number, reason: string) {
+    if (this.closedFired) return;
+    this.closedFired = true;
+    try {
+      const ev = Object.assign(new Event("close"), { code, reason }) as any;
+      this.onclose?.(ev);
+    } catch {
+      // ignore
+    }
+  }
+
+  private async pump(readable: ReadableStream<Uint8Array>) {
+    const reader = readable.getReader();
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        const ab = value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
+        try {
+          this.onmessage?.({ data: ab } as any);
+        } catch {
+          // ignore
+        }
+      }
+    } catch (err) {
+      const e = Object.assign(new Event("error"), {
+        message: err instanceof Error ? err.message : String(err),
+      });
+      try {
+        this.onerror?.(e);
+      } catch {
+        // ignore
+      }
+      this.fireClose(1006, "upstream read error");
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
 // 事件ID定义
 const EVENT_ID = {
   // 客户端事件
@@ -300,7 +431,7 @@ serve(async (req) => {
       // - X-Api-Access-Key: 你的 Access Token
       // - X-Api-Resource-Id: 固定值 volc.speech.dialog
       // - X-Api-App-Key: 固定值 PlgvMymc7f3tQnJ6
-      let doubaoSocket: WebSocket;
+      let doubaoSocket: UpstreamSocket;
       const upstreamHeaders: Record<string, string> = {
         "X-Api-App-ID": VOLCENGINE_APP_ID,
         "X-Api-Access-Key": accessToken,
@@ -311,69 +442,44 @@ serve(async (req) => {
       
       console.log("Using X-Api headers auth, headers configured");
 
+      // 上游连接：优先 WebSocketStream（可带 headers）→ 其次 Deno.connectWebSocket → 否则报错
       try {
-        // ✅ 正确方式：使用 Deno.connectWebSocket 以发送标准 WS 握手，同时允许携带自定义鉴权 headers。
-        // 之前用 fetch 模拟 upgrade 会遇到 hop-by-hop headers（Connection/Upgrade）被运行时剥离，导致上游 400。
-        const connectWebSocket = (Deno as any).connectWebSocket as
-          | ((url: string, options?: { headers?: Record<string, string> }) => Promise<{ socket: WebSocket; response: Response }>)
-          | undefined;
+        doubaoSocket = new WebSocketStreamAdapter(DOUBAO_WS_URL, upstreamHeaders);
+        console.log("Upstream connect: using WebSocketStream with headers");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn("WebSocketStream unavailable, trying Deno.connectWebSocket. reason:", msg);
 
-        if (!connectWebSocket) {
-          throw new Error("Deno.connectWebSocket not available in this runtime");
-        }
+        try {
+          const connectWebSocket = (Deno as any).connectWebSocket as
+            | ((
+                url: string,
+                options?: { headers?: Record<string, string> },
+              ) => Promise<{ socket: WebSocket; response: Response }>)
+            | undefined;
 
-        const { socket: upstreamSocket, response: upstreamResp } = await connectWebSocket(
-          DOUBAO_WS_URL,
-          { headers: upstreamHeaders },
-        );
-
-        console.log(
-          "Upstream handshake status:",
-          upstreamResp.status,
-          upstreamResp.statusText,
-        );
-
-        if (upstreamResp.status !== 101) {
-          let body = "";
-          try {
-            body = await upstreamResp.text();
-          } catch {
-            body = "";
+          if (!connectWebSocket) {
+            throw new Error("Deno.connectWebSocket not available in this runtime");
           }
 
-          console.error("Upstream handshake failed body:", body);
-          const bodySnippet = body ? body.slice(0, 500) : "";
-          console.error("Upstream handshake failed (non-101)");
+          const { socket: upstreamSocket } = await connectWebSocket(DOUBAO_WS_URL, {
+            headers: upstreamHeaders,
+          });
+          doubaoSocket = upstreamSocket as any;
+          console.log("Upstream connect: using Deno.connectWebSocket with headers");
+        } catch (err2) {
+          const msg2 = err2 instanceof Error ? err2.message : String(err2);
+          console.error("Upstream connect failed:", msg2);
           sendProxyError(
-            `上游握手失败：${upstreamResp.status} ${upstreamResp.statusText}${bodySnippet ? `；${bodySnippet}` : ""}`,
+            `无法建立到豆包上游的 WebSocket（需要握手携带鉴权 Headers）。当前后端运行环境不支持带 Header 的上游 WebSocket：${msg2}`,
           );
-
           try {
-            clientSocket.close(1011, "Upstream handshake failed");
+            clientSocket.close(1011, "Upstream connect not supported");
           } catch {
             // ignore
           }
           return response;
         }
-
-        doubaoSocket = upstreamSocket;
-        console.log("Upstream connect: using Deno.connectWebSocket with headers");
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn(
-          "Upstream connect via Deno.connectWebSocket failed, falling back to query auth. reason:",
-          msg,
-        );
-
-        // 回退：使用 query 参数传递认证信息（火山引擎格式）
-        const wsUrlWithAuth =
-          `${DOUBAO_WS_URL}?X-Api-App-ID=${encodeURIComponent(VOLCENGINE_APP_ID)}` +
-          `&X-Api-Access-Key=${encodeURIComponent(accessToken)}` +
-          `&X-Api-Resource-Id=volc.speech.dialog` +
-          `&X-Api-App-Key=PlgvMymc7f3tQnJ6` +
-          `&X-Api-Connect-Id=${connectId}`;
-        // ⚠️ 不要 console.log(wsUrlWithAuth)（包含敏感信息）
-        doubaoSocket = new WebSocket(wsUrlWithAuth);
       }
       
       let isDoubaoConnected = false;
