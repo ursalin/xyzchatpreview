@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Message, AppSettings } from '@/types/chat';
 import { supabase } from '@/integrations/supabase/client';
+import { removeParenthesesContent } from '@/lib/textUtils';
 
 // 角色图片 URL（需要是公开可访问的 URL）
 import characterFrontImg from '@/assets/character-front.jpg';
@@ -470,6 +471,13 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
       return;
     }
 
+    // 移除括号内的内容，不朗读
+    const textToSpeak = removeParenthesesContent(text);
+    if (!textToSpeak) {
+      console.log('No text to speak after removing parentheses content');
+      return;
+    }
+
     const lipsyncMode = voiceConfig.lipsyncMode || 'preset';
 
     // 预设动画模式：生成TTS后由预设动画系统同步播放
@@ -485,7 +493,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
               'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
             },
             body: JSON.stringify({
-              text,
+              text: textToSpeak,
               apiKey: voiceConfig.minimaxApiKey,
               groupId: voiceConfig.minimaxGroupId,
               voiceId: voiceConfig.voiceId,
@@ -524,8 +532,8 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     }
 
     // AI生成模式：原有逻辑
-    // 先检查缓存
-    const cached = getCachedVideo(text);
+    // 先检查缓存（使用过滤后的文本作为key）
+    const cached = getCachedVideo(textToSpeak);
     if (cached) {
       console.log('Using cached lipsync video - playing synced');
       await playSynced(cached.audioBase64, cached.videoUrl);
@@ -544,7 +552,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
             'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
           },
           body: JSON.stringify({
-            text,
+            text: textToSpeak,
             apiKey: voiceConfig.minimaxApiKey,
             groupId: voiceConfig.minimaxGroupId,
             voiceId: voiceConfig.voiceId,
@@ -562,7 +570,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
       if (data.audioContent) {
         // Step 2: 等待视频生成完成
         console.log('TTS audio ready, generating lipsync video...');
-        const videoUrl = await generateLipsyncVideo(data.audioContent, text);
+        const videoUrl = await generateLipsyncVideo(data.audioContent, textToSpeak);
         
         if (videoUrl) {
           // Step 3: 视频生成完成，同步播放音频和视频

@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { VoiceConfig } from '@/types/chat';
+import { removeParenthesesContent } from '@/lib/textUtils';
 
 export function useVoice(voiceConfig: VoiceConfig) {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -22,6 +23,13 @@ export function useVoice(voiceConfig: VoiceConfig) {
       return;
     }
 
+    // 移除括号内的内容，不朗读
+    const textToSpeak = removeParenthesesContent(text);
+    if (!textToSpeak) {
+      console.log('No text to speak after removing parentheses content');
+      return;
+    }
+
     setIsProcessing(true);
 
     try {
@@ -35,7 +43,7 @@ export function useVoice(voiceConfig: VoiceConfig) {
             'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
           },
           body: JSON.stringify({
-            text,
+            text: textToSpeak,
             apiKey: voiceConfig.minimaxApiKey,
             groupId: voiceConfig.minimaxGroupId,
             voiceId: voiceConfig.voiceId,
