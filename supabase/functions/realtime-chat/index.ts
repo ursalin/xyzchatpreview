@@ -224,22 +224,21 @@ serve(async (req) => {
     console.log("WebSocket upgrade request received");
     
     const VOLCENGINE_APP_ID = Deno.env.get("VOLCENGINE_APP_ID");
-    const VOLCENGINE_ACCESS_KEY = Deno.env.get("VOLCENGINE_ACCESS_KEY");
-    const VOLCENGINE_APP_KEY = Deno.env.get("VOLCENGINE_APP_KEY");
+    const VOLCENGINE_ACCESS_KEY = Deno.env.get("VOLCENGINE_ACCESS_KEY"); // 这是 Secret Key
+    const VOLCENGINE_APP_KEY = Deno.env.get("VOLCENGINE_APP_KEY"); // 这是 API Key (Access Token)
     
-    if (!VOLCENGINE_APP_ID || !VOLCENGINE_ACCESS_KEY) {
-      console.error("Missing Volcengine credentials");
+    if (!VOLCENGINE_APP_ID || !VOLCENGINE_APP_KEY) {
+      console.error("Missing Volcengine credentials: APP_ID or APP_KEY (Access Token)");
       return new Response("Missing API credentials", { status: 500 });
     }
     
-    // 如果没有配置 App Key，使用默认值（向后兼容）
-    const appKey = VOLCENGINE_APP_KEY || "PlgvMymc7f3tQnJ6";
+    // VOLCENGINE_APP_KEY 现在存储的是 Access Token，用于 Bearer 认证
+    const accessToken = VOLCENGINE_APP_KEY;
 
-    console.log("Connecting to Doubao Realtime API...");
-    // 不打印明文凭证，避免泄漏；仅打印长度用于排查
+    console.log("Connecting to Doubao Realtime API with Bearer Token auth...");
     console.log("App ID length:", VOLCENGINE_APP_ID.length);
-    console.log("Access key length:", VOLCENGINE_ACCESS_KEY.length);
-    console.log("App Key configured:", !!VOLCENGINE_APP_KEY);
+    console.log("Access Token length:", accessToken.length);
+    console.log("Access Token prefix:", accessToken.substring(0, 8) + "...");
 
     try {
       const connectId = crypto.randomUUID();
@@ -258,24 +257,17 @@ serve(async (req) => {
       console.log("Connecting to URL:", DOUBAO_WS_URL);
 
       // 连接到豆包 Realtime API
-      // 关键点：标准 WebSocket 构造函数在 Deno/Edge 环境里不支持传 headers（第二参会被当作 subprotocols），
-      // 因此这里优先使用 fetch 的 WebSocket Upgrade 方式来显式发送 headers。
-      // 若运行时不支持 Response.webSocket，则回退到 query 透传（通常会被上游拒绝并返回 400）。
+      // 使用 Bearer Token 认证方式（火山引擎语音 API 标准认证）
+      // Header 格式: "Authorization": "Bearer; {token}"
       let doubaoSocket: WebSocket;
-      const upstreamHeaders = {
+      const upstreamHeaders: Record<string, string> = {
+        "Authorization": `Bearer; ${accessToken}`,
         "X-Api-App-ID": VOLCENGINE_APP_ID,
-        "X-Api-Access-Key": VOLCENGINE_ACCESS_KEY,
         "X-Api-Resource-Id": "volc.speech.dialog",
-        "X-Api-App-Key": appKey,
         "X-Api-Connect-Id": connectId,
       };
-
-      // 额外提示：若 AK/SK 配置错，经常会直接 400
-      if (/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(VOLCENGINE_ACCESS_KEY)) {
-        console.warn(
-          "VOLCENGINE_ACCESS_KEY looks like a UUID. Volcengine AK usually starts with 'AK'. Please verify credentials.",
-        );
-      }
+      
+      console.log("Using Bearer Token auth, headers configured");
 
       try {
         const upstreamResp = await fetch(DOUBAO_WS_URL, {
@@ -322,15 +314,15 @@ serve(async (req) => {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.warn(
-          "Upstream connect via fetch-upgrade failed, falling back to query auth. reason:",
+          "Upstream connect via fetch-upgrade failed, falling back to query auth with Bearer token. reason:",
           msg,
         );
 
+        // 回退：使用 query 参数传递认证信息（Bearer Token 方式）
         const wsUrlWithAuth =
           `${DOUBAO_WS_URL}?X-Api-App-ID=${encodeURIComponent(VOLCENGINE_APP_ID)}` +
-          `&X-Api-Access-Key=${encodeURIComponent(VOLCENGINE_ACCESS_KEY)}` +
+          `&Authorization=${encodeURIComponent(`Bearer; ${accessToken}`)}` +
           `&X-Api-Resource-Id=volc.speech.dialog` +
-          `&X-Api-App-Key=${encodeURIComponent(appKey)}` +
           `&X-Api-Connect-Id=${connectId}`;
         // ⚠️ 不要 console.log(wsUrlWithAuth)（包含敏感信息）
         doubaoSocket = new WebSocket(wsUrlWithAuth);
