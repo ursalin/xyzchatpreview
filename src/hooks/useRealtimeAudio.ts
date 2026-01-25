@@ -415,8 +415,9 @@ export function useRealtimeAudio(options: UseRealtimeAudioOptions = {}) {
       const source = recordingContext.createMediaStreamSource(stream);
       sourceRef.current = source;
 
-      // 使用较小的 buffer 实现 20ms 发送间隔 (16000 * 0.02 = 320 samples)
-      const processor = recordingContext.createScriptProcessor(640, 1, 1);
+      // createScriptProcessor requires power-of-2 buffer size (256-16384)
+      // Use 512 samples per buffer (~32ms at 16kHz), send immediately
+      const processor = recordingContext.createScriptProcessor(512, 1, 1);
       processorRef.current = processor;
 
       processor.onaudioprocess = (e) => {
