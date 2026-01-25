@@ -331,12 +331,41 @@ serve(async (req) => {
       let isDoubaoConnected = false;
       let currentSessionId = "";
       const pendingMessages: Uint8Array[] = [];
+      let pingInterval: number | undefined;
       
+      // 清理心跳定时器
+      const clearPingInterval = () => {
+        if (pingInterval) {
+          clearInterval(pingInterval);
+          pingInterval = undefined;
+        }
+      };
 
       // 处理豆包连接
       doubaoSocket.onopen = () => {
         console.log("Connected to Doubao Realtime API");
         isDoubaoConnected = true;
+        
+        // 🔧 启动心跳机制 - 每15秒发送一次 ping 保持连接活跃
+        pingInterval = setInterval(() => {
+          if (doubaoSocket.readyState === WebSocket.OPEN) {
+            // 豆包可能需要特定格式的 ping，这里使用标准 JSON ping
+            try {
+              // 构建一个空的 TASK_REQUEST 作为心跳（豆包协议兼容）
+              const pingPayload = new TextEncoder().encode("{}");
+              const header = buildHeader(MESSAGE_TYPE.FULL_CLIENT_REQUEST, 0b0000, true);
+              const frame = new Uint8Array(4 + 4 + pingPayload.length);
+              const view = new DataView(frame.buffer);
+              frame.set(header, 0);
+              view.setUint32(4, pingPayload.length, false);
+              frame.set(pingPayload, 8);
+              doubaoSocket.send(frame);
+              console.log("Sent ping keepalive");
+            } catch (e) {
+              console.error("Failed to send ping:", e);
+            }
+          }
+        }, 15000) as unknown as number;
         
         // 发送 StartConnection 事件
         const startConnectionFrame = buildEventFrame(EVENT_ID.START_CONNECTION, "", {});
@@ -526,6 +555,7 @@ serve(async (req) => {
 
       doubaoSocket.onclose = (event: CloseEvent) => {
         console.log("Doubao WebSocket closed:", event.code, event.reason);
+        clearPingInterval(); // 清理心跳定时器
         if (clientSocket.readyState === WebSocket.OPEN) {
           clientSocket.send(JSON.stringify({
             type: "proxy.closed",
@@ -650,6 +680,7 @@ serve(async (req) => {
 
       clientSocket.onclose = (event) => {
         console.log("Client WebSocket closed:", event.code, event.reason);
+        clearPingInterval(); // 清理心跳定时器
         
         // 结束会话
         if (currentSessionId && doubaoSocket.readyState === WebSocket.OPEN) {
