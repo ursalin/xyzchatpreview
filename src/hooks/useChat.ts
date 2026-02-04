@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Message, AppSettings } from '@/types/chat';
+import { useMemoryManager } from './useMemoryManager';
 
 const CHAT_HISTORY_KEY = 'ai-companion-chat-history';
 const MAX_STORED_MESSAGES = 100; // 最多保存100条消息
@@ -42,6 +43,16 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
   const [messages, setMessages] = useState<Message[]>(() => loadStoredMessages());
   const [isLoading, setIsLoading] = useState(false);
 
+  // 使用记忆管理器
+  const {
+    memorySummary,
+    isSummarizing,
+    checkAndSummarize,
+    buildContextMessages,
+    clearMemory,
+    updateMemorySummary,
+  } = useMemoryManager();
+
   // 保存聊天记录到 localStorage
   useEffect(() => {
     if (messages.length > 0) {
@@ -68,6 +79,17 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
 
     try {
       const { apiConfig } = settings;
+
+      // 检查是否需要总结旧对话
+      const allMessages = [...messages, userMessage];
+      await checkAndSummarize(
+        allMessages,
+        import.meta.env.VITE_SUPABASE_URL,
+        import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+      );
+
+      // 构建上下文消息（包含记忆摘要 + 最近消息）
+      const contextMessages = buildContextMessages(allMessages);
       
       // Determine API endpoint and headers
       let apiUrl: string;
@@ -85,10 +107,7 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
           model: apiConfig.model || 'gpt-4o',
           messages: [
             { role: 'system', content: systemPrompt },
-            ...[...messages, userMessage].map(m => ({
-              role: m.role,
-              content: m.content,
-            })),
+            ...contextMessages,
           ],
           stream: true,
         };
@@ -100,10 +119,7 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
           'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
         };
         body = {
-          messages: [...messages, userMessage].map(m => ({
-            role: m.role,
-            content: m.content,
-          })),
+          messages: contextMessages,
           systemPrompt,
         };
       }
@@ -196,7 +212,7 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
     } finally {
       setIsLoading(false);
     }
-  }, [messages, settings, systemPrompt]);
+  }, [messages, settings, systemPrompt, checkAndSummarize, buildContextMessages]);
 
   const clearMessages = useCallback(() => {
     setMessages([]);
@@ -207,10 +223,20 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
     }
   }, []);
 
+  // 删除指定消息
+  const deleteMessages = useCallback((messageIds: string[]) => {
+    setMessages(prev => prev.filter(m => !messageIds.includes(m.id)));
+  }, []);
+
   return {
     messages,
     isLoading,
+    memorySummary,
+    isSummarizing,
     sendMessage,
     clearMessages,
+    deleteMessages,
+    clearMemory,
+    updateMemorySummary,
   };
 }
