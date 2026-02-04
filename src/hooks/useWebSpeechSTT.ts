@@ -29,7 +29,7 @@ export function useWebSpeechSTT({
       const recognition = new SpeechRecognition();
       recognition.lang = language;
       recognition.interimResults = true;
-      recognition.continuous = false;
+      recognition.continuous = true; // 持续监听
       recognition.maxAlternatives = 1;
 
       recognition.onstart = () => {

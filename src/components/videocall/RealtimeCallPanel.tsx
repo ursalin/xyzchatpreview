@@ -131,6 +131,12 @@ ${settings.character.background}
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        // 确保视频开始播放
+        try {
+          await videoRef.current.play();
+        } catch (e) {
+          console.log('Video autoplay blocked, user interaction needed');
+        }
       }
       return true;
     } catch (error) {
@@ -239,6 +245,16 @@ ${settings.character.background}
   };
 
   const handleStartCall = async () => {
+    // 检查语音设置
+    if (!settings.voiceConfig.enabled) {
+      toast.error('请先在设置中启用语音功能');
+      return;
+    }
+    if (!settings.voiceConfig.minimaxApiKey || !settings.voiceConfig.minimaxGroupId) {
+      toast.error('请先在设置中配置 MiniMax API');
+      return;
+    }
+
     if (callMode === 'video') {
       const cameraSuccess = await startCamera();
       if (!cameraSuccess) {
@@ -247,7 +263,13 @@ ${settings.character.background}
       }
     }
     
-    await connect();
+    const success = await connect();
+    if (!success) {
+      toast.error('无法启动语音识别，请使用 Chrome 或 Edge 浏览器');
+      return;
+    }
+    
+    toast.success('通话已连接，开始说话吧！');
     
     // 连接后自动开始录音
     setTimeout(() => {
@@ -263,18 +285,11 @@ ${settings.character.background}
     disconnect();
     stopCamera();
     lastVisionContextRef.current = '';
-    setMessages([]);
+    clearMessages();
   };
 
   const handleSendText = () => {
     if (!inputText.trim() || !isConnected) return;
-    
-    setMessages(prev => [...prev, {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: inputText,
-      timestamp: new Date()
-    }]);
     sendTextMessage(inputText);
     setInputText('');
     setShowTextInput(false);
