@@ -10,6 +10,7 @@ import { useSettings } from '@/hooks/useSettings';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
+import '@/styles/realtime-responsive.css';
 
 interface Message {
   id: string;
@@ -344,7 +345,7 @@ Timestamp: ${diagnostics.timestamp?.toISOString() ?? 'N/A'}`;
   };
 
   return (
-    <div className="h-full flex flex-col bg-gradient-to-b from-background to-muted/20 relative">
+    <div className="realtime-call-panel h-full flex flex-col bg-gradient-to-b from-background to-muted/20 relative">
       {/* 隐藏的canvas用于帧采样 */}
       <canvas ref={canvasRef} className="hidden" />
 

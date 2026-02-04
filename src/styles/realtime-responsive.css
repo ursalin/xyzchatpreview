@@ -1,0 +1,152 @@
+/* 响应式布局优化 - 微信风格 */
+
+/* 移动端优化 */
+@media (max-width: 768px) {
+  /* 实时通话面板 */
+  .realtime-call-panel {
+    padding: 0;
+  }
+
+  /* 消息区域 */
+  .realtime-messages {
+    padding: 1rem 0.75rem;
+    padding-top: 4rem; /* 为顶部状态栏留空间 */
+  }
+
+  /* 消息气泡 */
+  .message-bubble {
+    max-width: 85%;
+    font-size: 0.9375rem; /* 15px */
+  }
+
+  /* 用户摄像头 PiP */
+  .video-pip {
+    width: 6rem; /* 96px */
+    height: 8rem; /* 128px */
+    top: 3.5rem;
+    right: 0.75rem;
+  }
+
+  /* 底部控制栏 */
+  .call-controls {
+    padding: 1rem 0.75rem;
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+  }
+
+  /* 控制按钮 */
+  .control-button {
+    width: 3rem; /* 48px */
+    height: 3rem;
+  }
+
+  .control-button-large {
+    width: 3.5rem; /* 56px */
+    height: 3.5rem;
+  }
+
+  /* 模式切换按钮 */
+  .mode-switch {
+    padding: 0.5rem;
+  }
+
+  .mode-switch button {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+  }
+}
+
+/* 平板和桌面 */
+@media (min-width: 769px) {
+  /* 实时通话面板 */
+  .realtime-call-panel {
+    max-width: 480px;
+    margin: 0 auto;
+  }
+
+  /* 消息区域 */
+  .realtime-messages {
+    padding: 1.5rem 1rem;
+    padding-top: 5rem;
+  }
+
+  /* 消息气泡 */
+  .message-bubble {
+    max-width: 75%;
+  }
+
+  /* 用户摄像头 PiP */
+  .video-pip {
+    width: 7rem; /* 112px */
+    height: 9rem; /* 144px */
+    top: 4rem;
+    right: 1rem;
+  }
+
+  /* 底部控制栏 */
+  .call-controls {
+    padding: 1.5rem 1rem;
+  }
+
+  /* 控制按钮 */
+  .control-button {
+    width: 3rem;
+    height: 3rem;
+  }
+
+  .control-button-large {
+    width: 3.5rem;
+    height: 3.5rem;
+  }
+}
+
+/* 超大屏幕 */
+@media (min-width: 1024px) {
+  .realtime-call-panel {
+    max-width: 560px;
+  }
+}
+
+/* 横屏模式优化 */
+@media (max-height: 600px) and (orientation: landscape) {
+  .realtime-messages {
+    padding-top: 3rem;
+  }
+
+  .video-pip {
+    width: 5rem;
+    height: 6.5rem;
+    top: 2.5rem;
+  }
+
+  .call-controls {
+    padding: 0.75rem;
+  }
+
+  .control-button {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .control-button-large {
+    width: 3rem;
+    height: 3rem;
+  }
+}
+
+/* 安全区域适配（刘海屏、圆角屏） */
+.realtime-call-panel {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* 触摸优化 */
+@media (hover: none) and (pointer: coarse) {
+  .control-button,
+  .control-button-large {
+    /* 增大触摸区域 */
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
