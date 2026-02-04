@@ -3,21 +3,15 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { 
   Phone, PhoneOff, Mic, MicOff, Send, MessageSquare, 
-  Video, VideoOff, Volume2, VolumeX, Camera, AlertTriangle, Copy, RefreshCw, ChevronDown, ChevronUp
+  Video, VideoOff, Volume2, VolumeX, Camera
 } from 'lucide-react';
-import { useRealtimeAudio, ConnectionDiagnostics } from '@/hooks/useRealtimeAudio';
+import { useSimpleVoiceCall } from '@/hooks/useSimpleVoiceCall';
 import { useSettings } from '@/hooks/useSettings';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import '@/styles/realtime-responsive.css';
-
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: Date;
-}
+import { Message } from '@/types/chat';
 
 export type CallMode = 'voice' | 'video';
 
@@ -33,7 +27,6 @@ export const RealtimeCallPanel: React.FC<RealtimeCallPanelProps> = ({
   onAudioResponse
 }) => {
   const { settings } = useSettings();
-  const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [showTextInput, setShowTextInput] = useState(false);
   const [callMode, setCallMode] = useState<CallMode>('voice');
@@ -63,65 +56,27 @@ ${settings.character.background}
     return prompt;
   }, [settings.character, callMode]);
 
-  const [showDiagnostics, setShowDiagnostics] = useState(false);
-
+  // 使用简化的语音通话 hook (Web Speech API + MiniMax TTS)
   const {
+    messages,
+    isLoading,
     isConnected,
     isRecording,
-    isSpeaking,
-    transcript,
-    aiResponse,
-    diagnostics,
+    isPlaying: isSpeaking,
+    isSpeechSupported,
+    interimTranscript: transcript,
     connect,
     disconnect,
     startRecording,
     stopRecording,
-    sendTextMessage
-  } = useRealtimeAudio({
+    sendTextMessage,
+    clearMessages,
+  } = useSimpleVoiceCall({
+    settings,
     systemPrompt: buildSystemPrompt(),
-    voiceId: settings.voiceConfig.doubaoVoiceId || undefined, // 使用豆包克隆语音或默认
-    onTranscript: (text, isFinal) => {
-      if (isFinal && text.trim()) {
-        setMessages(prev => [...prev, {
-          id: `user-${Date.now()}`,
-          role: 'user',
-          content: text,
-          timestamp: new Date()
-        }]);
-      }
-    },
-    onSpeakingChange: (speaking) => {
-      onSpeakingChange?.(speaking);
-    },
-    onError: (error) => {
-      toast.error(error);
-    },
-    onAudioComplete: (audioBase64) => {
-      // 传递完整音频给 preset 动画系统
-      console.log('Audio complete, triggering animation');
-      onAudioResponse?.(audioBase64);
-    }
+    onSpeakingChange,
+    onAudioResponse,
   });
-
-  // Track AI responses
-  useEffect(() => {
-    if (aiResponse) {
-      setMessages(prev => {
-        const lastMsg = prev[prev.length - 1];
-        if (lastMsg?.role === 'assistant') {
-          return prev.map((m, i) => 
-            i === prev.length - 1 ? { ...m, content: aiResponse } : m
-          );
-        }
-        return [...prev, {
-          id: `ai-${Date.now()}`,
-          role: 'assistant',
-          content: aiResponse,
-          timestamp: new Date()
-        }];
-      });
-    }
-  }, [aiResponse]);
 
   // Auto-scroll messages
   useEffect(() => {
@@ -332,18 +287,6 @@ ${settings.character.background}
     }
   };
 
-  // 复制诊断信息
-  const copyDiagnostics = () => {
-    const info = `WebSocket Diagnostics
-Status: ${diagnostics.status}
-Close Code: ${diagnostics.lastCloseCode ?? 'N/A'}
-Close Reason: ${diagnostics.lastCloseReason ?? 'N/A'}
-Proxy Error: ${diagnostics.proxyError ?? 'N/A'}
-Timestamp: ${diagnostics.timestamp?.toISOString() ?? 'N/A'}`;
-    navigator.clipboard.writeText(info);
-    toast.success('诊断信息已复制');
-  };
-
   return (
     <div className="realtime-call-panel h-full flex flex-col bg-gradient-to-b from-background to-muted/20 relative">
       {/* 隐藏的canvas用于帧采样 */}
@@ -374,46 +317,16 @@ Timestamp: ${diagnostics.timestamp?.toISOString() ?? 'N/A'}`;
 
       {/* 消息区域 */}
       <div className="flex-1 overflow-y-auto p-4 pt-14 space-y-3">
-        {/* 连接错误诊断面板 */}
-        {diagnostics.status === 'error' && (
-          <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4 mb-3">
-            <div className="flex items-start gap-2">
-              <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
-              <div className="flex-1 min-w-0">
-                <h4 className="font-medium text-destructive mb-1">连接失败</h4>
-                <p className="text-sm text-muted-foreground mb-2">
-                  {diagnostics.proxyError || '上游 WebSocket 连接错误'}
-                </p>
-                <button 
-                  onClick={() => setShowDiagnostics(!showDiagnostics)}
-                  className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
-                >
-                  {showDiagnostics ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                  {showDiagnostics ? '收起详情' : '展开详情'}
-                </button>
-                {showDiagnostics && (
-                  <div className="mt-2 p-2 bg-muted/50 rounded text-xs font-mono space-y-1">
-                    <p>Status: <span className="text-destructive">{diagnostics.status}</span></p>
-                    <p>Close Code: {diagnostics.lastCloseCode ?? 'N/A'}</p>
-                    <p>Close Reason: {diagnostics.lastCloseReason || 'N/A'}</p>
-                    <p>Proxy Error: {diagnostics.proxyError || 'N/A'}</p>
-                    <p>Time: {diagnostics.timestamp?.toLocaleTimeString() ?? 'N/A'}</p>
-                  </div>
-                )}
-                <div className="flex gap-2 mt-3">
-                  <Button size="sm" variant="outline" onClick={copyDiagnostics}>
-                    <Copy className="h-3 w-3 mr-1" /> 复制日志
-                  </Button>
-                  <Button size="sm" variant="default" onClick={handleStartCall}>
-                    <RefreshCw className="h-3 w-3 mr-1" /> 重试连接
-                  </Button>
-                </div>
-              </div>
-            </div>
+        {/* 浏览器不支持提示 */}
+        {!isSpeechSupported && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 mb-3">
+            <p className="text-sm text-amber-600">
+              你的浏览器不支持语音识别，请使用 Chrome 或 Edge 浏览器。
+            </p>
           </div>
         )}
 
-        {messages.length === 0 && !isConnected && diagnostics.status !== 'error' && (
+        {messages.length === 0 && !isConnected && (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
             <Phone className="h-12 w-12 mb-4 opacity-50" />
             <p className="text-center">点击下方按钮开始{callMode === 'video' ? '视频' : '语音'}通话</p>
