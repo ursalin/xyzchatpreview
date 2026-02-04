@@ -711,6 +711,11 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     }
   }, []);
 
+  // 删除指定消息
+  const deleteMessages = useCallback((messageIds: string[]) => {
+    setMessages(prev => prev.filter(m => !messageIds.includes(m.id)));
+  }, []);
+
   // 清理
   useEffect(() => {
     return () => {
@@ -737,6 +742,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     stopRecording,
     sendMessage,
     clearMessages,
+    deleteMessages,
     clearMemory,
     updateMemorySummary,
     speak,

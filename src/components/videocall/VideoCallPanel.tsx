@@ -83,6 +83,7 @@ const VideoCallPanel: React.FC<VideoCallPanelProps> = ({
     stopRecording,
     sendMessage,
     clearMessages,
+    deleteMessages,
     clearMemory,
     updateMemorySummary,
     stopPlaying,
@@ -280,6 +281,7 @@ const VideoCallPanel: React.FC<VideoCallPanelProps> = ({
               onClearMemory={clearMemory}
               onUpdateMemory={updateMemorySummary}
               onClearMessages={clearMessages}
+              onDeleteMessages={deleteMessages}
             />
           </TabsContent>
         </Tabs>

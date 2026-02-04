@@ -3,7 +3,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Trash2, Save, Brain, Loader2 } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Trash2, Save, Brain, Loader2, CheckSquare, Square } from 'lucide-react';
 import { Message } from '@/types/chat';
 import { formatDistanceToNow } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
@@ -19,6 +20,7 @@ interface MemoryPanelProps {
   onClearMemory: () => void;
   onUpdateMemory: (content: string) => void;
   onClearMessages: () => void;
+  onDeleteMessages?: (messageIds: string[]) => void;
 }
 
 const MemoryPanel: React.FC<MemoryPanelProps> = ({
@@ -28,9 +30,12 @@ const MemoryPanel: React.FC<MemoryPanelProps> = ({
   onClearMemory,
   onUpdateMemory,
   onClearMessages,
+  onDeleteMessages,
 }) => {
   const [editingMemory, setEditingMemory] = React.useState(false);
   const [memoryText, setMemoryText] = React.useState(memorySummary?.content || '');
+  const [selectedMessages, setSelectedMessages] = React.useState<Set<string>>(new Set());
+  const [isSelectionMode, setIsSelectionMode] = React.useState(false);
 
   React.useEffect(() => {
     setMemoryText(memorySummary?.content || '');
@@ -39,6 +44,37 @@ const MemoryPanel: React.FC<MemoryPanelProps> = ({
   const handleSaveMemory = () => {
     onUpdateMemory(memoryText);
     setEditingMemory(false);
+  };
+
+  const toggleMessageSelection = (messageId: string) => {
+    const newSelection = new Set(selectedMessages);
+    if (newSelection.has(messageId)) {
+      newSelection.delete(messageId);
+    } else {
+      newSelection.add(messageId);
+    }
+    setSelectedMessages(newSelection);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedMessages.size === messages.length) {
+      setSelectedMessages(new Set());
+    } else {
+      setSelectedMessages(new Set(messages.map(m => m.id)));
+    }
+  };
+
+  const handleDeleteSelected = () => {
+    if (onDeleteMessages && selectedMessages.size > 0) {
+      onDeleteMessages(Array.from(selectedMessages));
+      setSelectedMessages(new Set());
+      setIsSelectionMode(false);
+    }
+  };
+
+  const handleCancelSelection = () => {
+    setSelectedMessages(new Set());
+    setIsSelectionMode(false);
   };
 
   return (
@@ -141,16 +177,65 @@ const MemoryPanel: React.FC<MemoryPanelProps> = ({
                 共 {messages.length} 条消息 • 最近 20 条会完整发送给 AI
               </CardDescription>
             </div>
-            {messages.length > 0 && (
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={onClearMessages}
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                清空
-              </Button>
-            )}
+            <div className="flex gap-2">
+              {!isSelectionMode && messages.length > 0 && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsSelectionMode(true)}
+                  >
+                    <CheckSquare className="w-4 h-4 mr-2" />
+                    选择
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={onClearMessages}
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    清空全部
+                  </Button>
+                </>
+              )}
+              {isSelectionMode && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={toggleSelectAll}
+                  >
+                    {selectedMessages.size === messages.length ? (
+                      <>
+                        <Square className="w-4 h-4 mr-2" />
+                        取消全选
+                      </>
+                    ) : (
+                      <>
+                        <CheckSquare className="w-4 h-4 mr-2" />
+                        全选
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={handleDeleteSelected}
+                    disabled={selectedMessages.size === 0}
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    删除 ({selectedMessages.size})
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleCancelSelection}
+                  >
+                    取消
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
         </CardHeader>
         <CardContent className="flex-1 min-h-0">
@@ -164,13 +249,27 @@ const MemoryPanel: React.FC<MemoryPanelProps> = ({
                 {messages.map((message, index) => (
                   <div
                     key={message.id}
-                    className={`p-3 rounded-lg ${
+                    className={`relative p-3 rounded-lg ${
                       message.role === 'user'
                         ? 'bg-primary/10 ml-8'
                         : 'bg-muted mr-8'
+                    } ${
+                      selectedMessages.has(message.id)
+                        ? 'ring-2 ring-primary'
+                        : ''
                     }`}
+                    onClick={() => isSelectionMode && toggleMessageSelection(message.id)}
+                    style={{ cursor: isSelectionMode ? 'pointer' : 'default' }}
                   >
-                    <div className="flex items-center justify-between mb-1">
+                    {isSelectionMode && (
+                      <div className="absolute top-2 left-2">
+                        <Checkbox
+                          checked={selectedMessages.has(message.id)}
+                          onCheckedChange={() => toggleMessageSelection(message.id)}
+                        />
+                      </div>
+                    )}
+                    <div className={`flex items-center justify-between mb-1 ${isSelectionMode ? 'ml-6' : ''}`}>
                       <span className="text-xs font-medium">
                         {message.role === 'user' ? '用户' : 'AI'}
                       </span>
@@ -182,11 +281,11 @@ const MemoryPanel: React.FC<MemoryPanelProps> = ({
                         })}
                       </span>
                     </div>
-                    <p className="text-sm whitespace-pre-wrap">
+                    <p className={`text-sm whitespace-pre-wrap ${isSelectionMode ? 'ml-6' : ''}`}>
                       {message.content}
                     </p>
                     {index < messages.length - 20 && (
-                      <div className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                      <div className={`mt-2 text-xs text-amber-600 dark:text-amber-400 ${isSelectionMode ? 'ml-6' : ''}`}>
                         ⚠️ 此消息将被总结为记忆摘要
                       </div>
                     )}
