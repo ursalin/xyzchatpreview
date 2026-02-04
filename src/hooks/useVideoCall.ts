@@ -3,6 +3,7 @@ import { Message, AppSettings } from '@/types/chat';
 import { supabase } from '@/integrations/supabase/client';
 import { removeParenthesesContent } from '@/lib/textUtils';
 import { useWebSpeechSTT } from './useWebSpeechSTT';
+import { useMemoryManager } from './useMemoryManager';
 
 // 角色图片 URL（需要是公开可访问的 URL）
 import characterFrontImg from '@/assets/character-front.jpg';
@@ -132,6 +133,16 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const lipsyncCacheRef = useRef<Map<string, LipsyncCacheEntry>>(loadCache());
   const pendingTranscriptRef = useRef<string>('');
+
+  // 使用记忆管理器
+  const {
+    memorySummary,
+    isSummarizing,
+    checkAndSummarize,
+    buildContextMessages,
+    clearMemory,
+    updateMemorySummary,
+  } = useMemoryManager();
 
   // 使用 Web Speech API 进行语音识别
   const {
@@ -572,6 +583,17 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     setIsLoading(true);
 
     try {
+      // 检查是否需要总结旧对话
+      const allMessages = [...messages, userMessage];
+      await checkAndSummarize(
+        allMessages,
+        import.meta.env.VITE_SUPABASE_URL,
+        import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
+      );
+
+      // 构建上下文消息（包含记忆摘要 + 最近消息）
+      const contextMessages = buildContextMessages(allMessages);
+
       // 截取当前画面
       const image = includeImage ? captureFrame() : null;
       
@@ -584,10 +606,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
             'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
           },
           body: JSON.stringify({
-            messages: [...messages, userMessage].map(m => ({
-              role: m.role,
-              content: m.content,
-            })),
+            messages: contextMessages,
             systemPrompt,
             image,
           }),
@@ -680,7 +699,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     } finally {
       setIsLoading(false);
     }
-  }, [messages, systemPrompt, captureFrame, settings, speak]);
+  }, [messages, systemPrompt, captureFrame, settings, speak, checkAndSummarize, buildContextMessages]);
 
   // 清除消息
   const clearMessages = useCallback(() => {
@@ -709,6 +728,8 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     isPlaying,
     isGeneratingLipsync,
     interimTranscript,
+    memorySummary,
+    isSummarizing,
     startCamera,
     stopCamera,
     captureFrame,
@@ -716,6 +737,8 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     stopRecording,
     sendMessage,
     clearMessages,
+    clearMemory,
+    updateMemorySummary,
     speak,
     stopPlaying,
   };

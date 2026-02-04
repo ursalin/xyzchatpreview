@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   Video, 
   VideoOff, 
@@ -13,13 +14,16 @@ import {
   Loader2,
   Volume2,
   VolumeX,
-  Trash2
+  Trash2,
+  MessageSquare,
+  Brain
 } from 'lucide-react';
 import { useVideoCall } from '@/hooks/useVideoCall';
 import { useSettings } from '@/hooks/useSettings';
 import { ChatMessage } from '@/components/chat/ChatMessage';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import MemoryPanel from '@/components/memory/MemoryPanel';
 
 interface VideoCallPanelProps {
   onSpeakingChange?: (isSpeaking: boolean) => void;
@@ -71,12 +75,16 @@ const VideoCallPanel: React.FC<VideoCallPanelProps> = ({
     isPlaying,
     isGeneratingLipsync,
     interimTranscript,
+    memorySummary,
+    isSummarizing,
     startCamera,
     stopCamera,
     startRecording,
     stopRecording,
     sendMessage,
     clearMessages,
+    clearMemory,
+    updateMemorySummary,
     stopPlaying,
   } = useVideoCall({
     settings,
@@ -230,20 +238,51 @@ const VideoCallPanel: React.FC<VideoCallPanelProps> = ({
 
       {/* 消息区域 */}
       <div className="flex-1 min-h-0">
-        <ScrollArea className="h-full px-4">
-          {messages.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-muted-foreground">
-              <p>开始视频通话后，对话将显示在这里</p>
-            </div>
-          ) : (
-            <div className="py-4 space-y-4">
-              {messages.map((message) => (
-                <ChatMessage key={message.id} message={message} />
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </ScrollArea>
+        <Tabs defaultValue="chat" className="h-full flex flex-col">
+          <TabsList className="mx-4 mt-2">
+            <TabsTrigger value="chat" className="gap-2">
+              <MessageSquare className="w-4 h-4" />
+              对话
+            </TabsTrigger>
+            <TabsTrigger value="memory" className="gap-2">
+              <Brain className="w-4 h-4" />
+              记忆
+              {memorySummary && (
+                <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary/20 rounded">
+                  {memorySummary.summarizedCount}
+                </span>
+              )}
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="chat" className="flex-1 min-h-0 mt-0">
+            <ScrollArea className="h-full px-4">
+              {messages.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-muted-foreground">
+                  <p>开始视频通话后，对话将显示在这里</p>
+                </div>
+              ) : (
+                <div className="py-4 space-y-4">
+                  {messages.map((message) => (
+                    <ChatMessage key={message.id} message={message} />
+                  ))}
+                  <div ref={messagesEndRef} />
+                </div>
+              )}
+            </ScrollArea>
+          </TabsContent>
+
+          <TabsContent value="memory" className="flex-1 min-h-0 mt-0">
+            <MemoryPanel
+              messages={messages}
+              memorySummary={memorySummary}
+              isSummarizing={isSummarizing}
+              onClearMemory={clearMemory}
+              onUpdateMemory={updateMemorySummary}
+              onClearMessages={clearMessages}
+            />
+          </TabsContent>
+        </Tabs>
       </div>
 
       {/* 输入区域 */}
