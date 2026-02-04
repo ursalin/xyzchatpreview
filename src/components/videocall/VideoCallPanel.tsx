@@ -70,6 +70,7 @@ const VideoCallPanel: React.FC<VideoCallPanelProps> = ({
     isProcessingVoice,
     isPlaying,
     isGeneratingLipsync,
+    interimTranscript,
     startCamera,
     stopCamera,
     startRecording,
@@ -129,14 +130,8 @@ const VideoCallPanel: React.FC<VideoCallPanelProps> = ({
   // 语音输入
   const handleVoiceToggle = async () => {
     if (isRecording) {
-      try {
-        const text = await stopRecording();
-        if (text.trim()) {
-          await sendMessage(text, true);
-        }
-      } catch (error) {
-        console.error('Voice input error:', error);
-      }
+      // 停止录音 - Web Speech API 会自动通过回调发送消息
+      stopRecording();
     } else {
       try {
         await startRecording();
@@ -314,6 +309,11 @@ const VideoCallPanel: React.FC<VideoCallPanelProps> = ({
             <div className="mt-2 flex items-center gap-2 text-destructive text-sm">
               <div className="w-2 h-2 bg-destructive rounded-full animate-pulse" />
               正在录音，点击麦克风按钮停止...
+              {interimTranscript && (
+                <span className="text-muted-foreground ml-2">
+                  识别中: {interimTranscript}
+                </span>
+              )}
             </div>
           )}
         </div>

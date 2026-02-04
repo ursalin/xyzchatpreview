@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { Message, AppSettings } from '@/types/chat';
 import { supabase } from '@/integrations/supabase/client';
 import { removeParenthesesContent } from '@/lib/textUtils';
+import { useWebSpeechSTT } from './useWebSpeechSTT';
 
 // 角色图片 URL（需要是公开可访问的 URL）
 import characterFrontImg from '@/assets/character-front.jpg';
@@ -121,18 +122,52 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
   const [messages, setMessages] = useState<Message[]>(() => loadStoredMessages());
   const [isLoading, setIsLoading] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [isProcessingVoice, setIsProcessingVoice] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isGeneratingLipsync, setIsGeneratingLipsync] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState('');
   
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const lipsyncCacheRef = useRef<Map<string, LipsyncCacheEntry>>(loadCache());
+  const pendingTranscriptRef = useRef<string>('');
+
+  // 使用 Web Speech API 进行语音识别
+  const {
+    isListening: isRecording,
+    interimTranscript: webSpeechInterim,
+    startListening,
+    stopListening,
+  } = useWebSpeechSTT({
+    language: 'zh-CN',
+    onResult: (transcript, isFinal) => {
+      if (isFinal) {
+        // 最终结果，发送消息
+        if (transcript.trim()) {
+          sendMessage(transcript.trim(), true);
+        }
+        setInterimTranscript('');
+        pendingTranscriptRef.current = '';
+      } else {
+        // 临时结果，仅显示
+        setInterimTranscript(transcript);
+        pendingTranscriptRef.current = transcript;
+      }
+    },
+    onError: (error) => {
+      console.error('[STT Error]', error);
+      setInterimTranscript('');
+      pendingTranscriptRef.current = '';
+    },
+  });
+
+  // 同步 Web Speech 的临时识别结果
+  useEffect(() => {
+    setInterimTranscript(webSpeechInterim);
+  }, [webSpeechInterim]);
+
+  const isProcessingVoice = false; // Web Speech API 不需要处理延迟
 
   // 保存聊天记录到 localStorage
   useEffect(() => {
@@ -209,103 +244,23 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     return canvas.toDataURL('image/jpeg', 0.8);
   }, []);
 
-  // 开始录音
+  // 开始录音 - 使用 Web Speech API
   const startRecording = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
-      
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus',
-      });
-      
-      mediaRecorderRef.current = mediaRecorder;
-      chunksRef.current = [];
-      
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunksRef.current.push(e.data);
-        }
-      };
-      
-      mediaRecorder.start(100);
-      setIsRecording(true);
-    } catch (error) {
-      console.error('Failed to start recording:', error);
-      throw error;
+    const success = startListening();
+    if (!success) {
+      throw new Error('Failed to start speech recognition');
     }
-  }, []);
+  }, [startListening]);
 
-  // 停止录音并转文字
+  // 停止录音 - 使用 Web Speech API
   const stopRecording = useCallback(async (): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      if (!mediaRecorderRef.current) {
-        reject(new Error('No recording in progress'));
-        return;
-      }
-
-      const mediaRecorder = mediaRecorderRef.current;
-      
-      mediaRecorder.onstop = async () => {
-        setIsRecording(false);
-        setIsProcessingVoice(true);
-        
-        try {
-          const audioBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
-          
-          const reader = new FileReader();
-          reader.readAsDataURL(audioBlob);
-          
-          reader.onloadend = async () => {
-            try {
-              const base64Audio = (reader.result as string).split(',')[1];
-              
-              const response = await fetch(
-                `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/voice-to-text`,
-                {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-                  },
-                  body: JSON.stringify({ audio: base64Audio }),
-                }
-              );
-
-              if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error || 'STT request failed');
-              }
-
-              const data = await response.json();
-              resolve(data.text || '');
-            } catch (error) {
-              reject(error);
-            } finally {
-              setIsProcessingVoice(false);
-            }
-          };
-          
-          reader.onerror = () => {
-            setIsProcessingVoice(false);
-            reject(new Error('Failed to read audio data'));
-          };
-        } catch (error) {
-          setIsProcessingVoice(false);
-          reject(error);
-        }
-        
-        mediaRecorder.stream.getTracks().forEach(track => track.stop());
-      };
-      
-      mediaRecorder.stop();
-    });
-  }, []);
+    stopListening();
+    // Web Speech API 会通过 onResult 回调返回结果
+    // 这里返回当前的临时识别结果（如果有的话）
+    const result = pendingTranscriptRef.current || '';
+    pendingTranscriptRef.current = '';
+    return result;
+  }, [stopListening]);
 
   // 将角色图片转换为 base64 data URL (fal.ai 可以直接使用)
   const getCharacterImageDataUrl = useCallback(async (): Promise<string> => {
@@ -753,6 +708,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     isProcessingVoice,
     isPlaying,
     isGeneratingLipsync,
+    interimTranscript,
     startCamera,
     stopCamera,
     captureFrame,
