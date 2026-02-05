@@ -90,7 +90,7 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
   };
 
   return (
-    <div className="flex flex-col h-full bg-gradient-to-b from-background to-muted/20 md:pt-0 pt-[200px]">
+    <div className="flex flex-col h-full bg-gradient-to-b from-background to-muted/20">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-background/80 backdrop-blur-sm">
         <div className="flex items-center gap-2 ml-10 md:ml-10">
