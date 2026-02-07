@@ -9,7 +9,7 @@ import { useSimpleVoiceCall } from '@/hooks/useSimpleVoiceCall';
 import { useSettings } from '@/hooks/useSettings';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import { supabase } from '@/integrations/supabase/client';
+// supabase import removed - using fetch directly for vision-chat
 import '@/styles/realtime-responsive.css';
 import { Message } from '@/types/chat';
 
@@ -178,24 +178,69 @@ ${settings.character.background}
     const imageDataUrl = canvas.toDataURL('image/jpeg', 0.6);
 
     try {
-      // 发送到 vision-chat 获取描述
-      const { data, error } = await supabase.functions.invoke('vision-chat', {
-        body: {
-          messages: [{ role: 'user', content: '请用一句话简洁描述你看到的画面。' }],
-          systemPrompt: '你是一个视觉分析助手，用简洁的中文描述画面内容。',
-          image: imageDataUrl
+      // 直接用 fetch 调用 vision-chat 并解析 SSE 流
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/vision-chat`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({
+            messages: [{ role: 'user', content: '请用一句话简洁描述你看到的画面。' }],
+            systemPrompt: '你是一个视觉分析助手，用简洁的中文描述画面内容。',
+            image: imageDataUrl,
+          }),
         }
-      });
+      );
 
-      if (!error && data) {
-        // 解析流式响应
-        if (typeof data === 'string') {
-          lastVisionContextRef.current = data.slice(0, 200);
-          console.log('Vision context updated:', lastVisionContextRef.current);
+      if (!response.ok) {
+        console.error('[Vision] API error:', response.status);
+        return;
+      }
+
+      // 解析 SSE 流提取文本内容
+      const reader = response.body?.getReader();
+      if (!reader) return;
+
+      const decoder = new TextDecoder();
+      let visionText = '';
+      let textBuffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        textBuffer += decoder.decode(value, { stream: true });
+
+        let newlineIndex: number;
+        while ((newlineIndex = textBuffer.indexOf('\n')) !== -1) {
+          let line = textBuffer.slice(0, newlineIndex);
+          textBuffer = textBuffer.slice(newlineIndex + 1);
+
+          if (line.endsWith('\r')) line = line.slice(0, -1);
+          if (!line.startsWith('data: ')) continue;
+
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === '[DONE]') break;
+
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) visionText += delta;
+          } catch {
+            // 不完整的 JSON，忽略
+          }
         }
       }
+
+      if (visionText) {
+        lastVisionContextRef.current = visionText.slice(0, 200);
+        console.log('[Vision] Context updated:', lastVisionContextRef.current);
+      }
     } catch (e) {
-      console.error('Frame analysis error:', e);
+      console.error('[Vision] Frame analysis error:', e);
     }
   }, [callMode]);
 

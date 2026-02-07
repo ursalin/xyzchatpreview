@@ -58,7 +58,9 @@ export function useSimpleVoiceCall({
     if (!textToSpeak) return;
 
     try {
-      console.log('Generating TTS audio...');
+      console.log('[TTS] Generating audio for:', textToSpeak.substring(0, 50) + '...');
+      console.log('[TTS] Config:', { voiceId: voiceConfig.voiceId, groupId: voiceConfig.minimaxGroupId?.substring(0, 6) + '...' });
+      
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/minimax-tts`,
         {
@@ -77,27 +79,46 @@ export function useSimpleVoiceCall({
       );
 
       if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-        throw new Error(error.error || `TTS request failed: ${response.status}`);
+        const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+        const errMsg = errorData.error || `TTS request failed: ${response.status}`;
+        console.error('[TTS] API error:', errMsg);
+        // 让用户看到错误而不是静默失败
+        import('sonner').then(({ toast }) => toast.error(`语音合成失败: ${errMsg}`));
+        return;
       }
 
       const data = await response.json();
       
       if (data.audioContent) {
+        console.log('[TTS] Got audio, length:', data.audioContent.length);
         onAudioResponse?.(data.audioContent);
         
         const audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
         const audio = new Audio(audioUrl);
         audioRef.current = audio;
         
-        audio.onplay = () => setIsPlaying(true);
-        audio.onended = () => setIsPlaying(false);
-        audio.onerror = () => setIsPlaying(false);
+        audio.onplay = () => {
+          console.log('[TTS] Audio playing');
+          setIsPlaying(true);
+        };
+        audio.onended = () => {
+          console.log('[TTS] Audio ended');
+          setIsPlaying(false);
+        };
+        audio.onerror = (e) => {
+          console.error('[TTS] Audio playback error:', e);
+          setIsPlaying(false);
+          import('sonner').then(({ toast }) => toast.error('音频播放失败'));
+        };
         
         await audio.play();
+      } else {
+        console.error('[TTS] No audioContent in response:', data);
+        import('sonner').then(({ toast }) => toast.error('语音合成返回空数据'));
       }
     } catch (error) {
-      console.error('TTS error:', error);
+      console.error('[TTS] Error:', error);
+      import('sonner').then(({ toast }) => toast.error(`语音合成异常: ${error instanceof Error ? error.message : '未知错误'}`));
     }
   }, [onAudioResponse]);
 
