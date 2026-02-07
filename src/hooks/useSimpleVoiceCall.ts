@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Message, AppSettings } from '@/types/chat';
+import { Message, AppSettings, defaultVoiceConfig } from '@/types/chat';
 import { useWebSpeechSTT } from './useWebSpeechSTT';
 import { removeParenthesesContent } from '@/lib/textUtils';
 
@@ -49,7 +49,13 @@ export function useSimpleVoiceCall({
 
   const speak = useCallback(async (text: string) => {
     const { voiceConfig } = settingsRef.current;
-    if (!voiceConfig.enabled || !voiceConfig.minimaxApiKey || !voiceConfig.minimaxGroupId) {
+    // Fallback to defaults if saved config has empty keys
+    const apiKey = voiceConfig.minimaxApiKey || defaultVoiceConfig.minimaxApiKey;
+    const groupId = voiceConfig.minimaxGroupId || defaultVoiceConfig.minimaxGroupId;
+    const voice = voiceConfig.voiceId || defaultVoiceConfig.voiceId;
+    const enabled = voiceConfig.minimaxApiKey ? voiceConfig.enabled : defaultVoiceConfig.enabled;
+
+    if (!enabled || !apiKey || !groupId) {
       console.log('Voice not enabled or missing config, skipping TTS');
       return;
     }
@@ -71,9 +77,9 @@ export function useSimpleVoiceCall({
           },
           body: JSON.stringify({
             text: textToSpeak,
-            apiKey: voiceConfig.minimaxApiKey,
-            groupId: voiceConfig.minimaxGroupId,
-            voiceId: voiceConfig.voiceId,
+            apiKey: apiKey,
+            groupId: groupId,
+            voiceId: voice,
           }),
         }
       );
