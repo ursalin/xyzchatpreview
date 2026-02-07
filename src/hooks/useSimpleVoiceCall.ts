@@ -65,39 +65,73 @@ export function useSimpleVoiceCall({
 
     try {
       console.log('[TTS] Generating audio for:', textToSpeak.substring(0, 50) + '...');
-      console.log('[TTS] Config:', { voiceId: voiceConfig.voiceId, groupId: voiceConfig.minimaxGroupId?.substring(0, 6) + '...' });
+      console.log('[TTS] Config:', { voiceId: voice, groupId: groupId.substring(0, 6) + '...' });
       
+      // 直接调MiniMax API，不走Supabase edge function
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/minimax-tts`,
+        `https://api.minimax.chat/v1/t2a_v2?GroupId=${groupId}`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            'Authorization': `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
+            model: 'speech-01-turbo',
             text: textToSpeak,
-            apiKey: apiKey,
-            groupId: groupId,
-            voiceId: voice,
+            stream: false,
+            voice_setting: {
+              voice_id: voice,
+              speed: 1.0,
+              vol: 1.0,
+              pitch: 0,
+            },
+            audio_setting: {
+              sample_rate: 32000,
+              bitrate: 128000,
+              format: 'mp3',
+            },
           }),
         }
       );
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-        const errMsg = errorData.error || `TTS request failed: ${response.status}`;
-        console.error('[TTS] API error:', errMsg);
-        // 让用户看到错误而不是静默失败
+        const errorText = await response.text();
+        console.error('[TTS] API error:', response.status, errorText);
+        import('sonner').then(({ toast }) => toast.error(`语音合成失败: ${response.status}`));
+        return;
+      }
+
+      const result = await response.json();
+      
+      if (result.base_resp?.status_code !== 0) {
+        const errMsg = result.base_resp?.status_msg || 'MiniMax API error';
+        console.error('[TTS] MiniMax error:', errMsg);
         import('sonner').then(({ toast }) => toast.error(`语音合成失败: ${errMsg}`));
         return;
       }
 
-      const data = await response.json();
-      
-      if (data.audioContent) {
-        console.log('[TTS] Got audio, length:', data.audioContent.length);
-        onAudioResponse?.(data.audioContent);
+      const audioHex = result.data?.audio;
+      if (!audioHex) {
+        console.error('[TTS] No audio data in response');
+        import('sonner').then(({ toast }) => toast.error('语音合成失败: 无音频数据'));
+        return;
+      }
+
+      // Convert hex to base64
+      const bytes = new Uint8Array(audioHex.length / 2);
+      for (let i = 0; i < audioHex.length; i += 2) {
+        bytes[i / 2] = parseInt(audioHex.substring(i, i + 2), 16);
+      }
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const audioBase64 = btoa(binary);
+
+      if (audioBase64) {
+        console.log('[TTS] Got audio, length:', audioBase64.length);
+        onAudioResponse?.(audioBase64);
         
         const audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
         const audio = new Audio(audioUrl);
