@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => ({
   },
   build: {
     target: 'es2020',
-    minify: 'terser',
+    minify: 'esbuild',
   },
   plugins: [
     react(),
