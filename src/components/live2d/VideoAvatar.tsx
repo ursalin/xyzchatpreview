@@ -70,7 +70,7 @@ interface DrawFailLog {
 const DEFAULT_CONFIG: LoopConfig = {
   loopStartPercent: 0,
   loopEndPercent: 0,
-  crossfadeMs: 120,
+  crossfadeMs: 400,
 };
 
 // 计算两帧之间的差异分数 (0-100)
@@ -707,6 +707,24 @@ const VideoAvatar = forwardRef<VideoAvatarRef, VideoAvatarProps>(({
       onImageLoaded?.();
 
       loop();
+
+      // 自动帧分析：延迟1秒后异步执行，不阻塞渲染循环
+      setTimeout(async () => {
+        if (destroyed) return;
+        try {
+          const result = await analyzeVideoFrames(src, () => {});
+          if (!destroyed && result) {
+            setConfig(c => ({
+              ...c,
+              loopStartPercent: result.bestStartPercent,
+              loopEndPercent: result.bestEndPercent,
+            }));
+            console.log('[VideoAvatar] Auto-analysis applied:', result.bestStartPercent, result.bestEndPercent);
+          }
+        } catch (e) {
+          console.warn('[VideoAvatar] Auto frame analysis failed:', e);
+        }
+      }, 1000);
     };
     
     const onCanPlayA = async () => {
@@ -752,7 +770,7 @@ const VideoAvatar = forwardRef<VideoAvatarRef, VideoAvatarProps>(({
 
   // 播放速率调整
   useEffect(() => {
-    const rate = isSpeaking ? 1.15 : 1.0;
+    const rate = isSpeaking ? 1.05 : 1.0;
     if (videoARef.current) videoARef.current.playbackRate = rate;
     if (videoBRef.current) videoBRef.current.playbackRate = rate;
   }, [isSpeaking]);

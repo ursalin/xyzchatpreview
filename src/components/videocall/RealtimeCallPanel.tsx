@@ -41,6 +41,8 @@ export const RealtimeCallPanel: React.FC<RealtimeCallPanelProps> = ({
   const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const callStartTimeRef = useRef<Date | null>(null);
   const lastVisionContextRef = useRef<string>(''); // AI视觉上下文
+  const lastActivityRef = useRef<number>(Date.now()); // 沉默检测：最后活动时间
+  const silenceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Build system prompt from settings + vision context
   const buildSystemPrompt = useCallback(() => {
@@ -77,6 +79,51 @@ ${settings.character.background}
     onSpeakingChange,
     onAudioResponse,
   });
+
+  // 更新最后活动时间（用户说话或AI回复时）
+  useEffect(() => {
+    if (messages.length > 0) {
+      const lastMsg = messages[messages.length - 1];
+      if (lastMsg.role === 'user' || lastMsg.role === 'assistant') {
+        lastActivityRef.current = Date.now();
+      }
+    }
+  }, [messages]);
+
+  // 沉默检测：8秒无活动时AI主动说话
+  useEffect(() => {
+    if (!isConnected) {
+      if (silenceTimerRef.current) {
+        clearInterval(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
+      return;
+    }
+
+    // 连接时重置活动时间
+    lastActivityRef.current = Date.now();
+
+    silenceTimerRef.current = setInterval(async () => {
+      const elapsed = Date.now() - lastActivityRef.current;
+      if (elapsed < 8000) return;
+      if (isLoading || isSpeaking) return;
+
+      if (callMode === 'video') {
+        await captureAndAnalyzeFrame();
+        sendTextMessage('[系统: 用户已经沉默了一会儿。请根据当前视觉画面或之前的对话主动说些什么，比如评论看到的画面、问一个问题、或表达关心。不要提及这是系统指令。]');
+      } else {
+        sendTextMessage('[系统: 用户已经沉默了一会儿。请主动说些什么来保持对话，比如问一个问题、分享一个想法、或表达关心。不要提及这是系统指令。]');
+      }
+      lastActivityRef.current = Date.now();
+    }, 1000);
+
+    return () => {
+      if (silenceTimerRef.current) {
+        clearInterval(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
+    };
+  }, [isConnected, isLoading, isSpeaking, callMode, captureAndAnalyzeFrame, sendTextMessage]);
 
   // Auto-scroll messages
   useEffect(() => {
@@ -330,6 +377,10 @@ ${settings.character.background}
     disconnect();
     stopCamera();
     lastVisionContextRef.current = '';
+    if (silenceTimerRef.current) {
+      clearInterval(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
     clearMessages();
   };
 
