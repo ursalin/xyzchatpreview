@@ -9,10 +9,15 @@ export function useSettings() {
       const saved = localStorage.getItem(SETTINGS_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
+        // If saved voiceConfig has empty API key, use defaults instead
+        const savedVoice = parsed.voiceConfig || {};
+        const voiceConfig = savedVoice.minimaxApiKey
+          ? { ...defaultVoiceConfig, ...savedVoice }
+          : { ...defaultVoiceConfig };
         return { 
           ...defaultSettings, 
           ...parsed,
-          voiceConfig: { ...defaultVoiceConfig, ...parsed.voiceConfig }
+          voiceConfig,
         };
       }
     } catch (e) {
