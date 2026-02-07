@@ -30,6 +30,8 @@ export function useSimpleVoiceCall({
   // STT 暂停/恢复控制，在 TTS 播放时暂停，防止回声
   const pauseSTTRef = useRef<(() => void) | null>(null);
   const resumeSTTRef = useRef<(() => void) | null>(null);
+  // TTS 播放中标志：true 时忽略所有 STT 结果（防止缓冲的识别结果触发发送）
+  const isTTSPlayingRef = useRef(false);
 
   // 同步 state 到 ref
   useEffect(() => {
@@ -141,6 +143,7 @@ export function useSimpleVoiceCall({
         audioRef.current = audio;
         
         // 播放前暂停 STT，防止角色声音被识别成用户输入
+        isTTSPlayingRef.current = true;
         pauseSTTRef.current?.();
 
         audio.onplay = () => {
@@ -150,13 +153,19 @@ export function useSimpleVoiceCall({
         audio.onended = () => {
           console.log('[TTS] Audio ended');
           setIsPlaying(false);
-          // 播完恢复 STT
-          resumeSTTRef.current?.();
+          // 播完恢复 STT（延迟清除标志，确保残余识别结果被丢弃）
+          setTimeout(() => {
+            isTTSPlayingRef.current = false;
+            resumeSTTRef.current?.();
+          }, 500);
         };
         audio.onerror = (e) => {
           console.error('[TTS] Audio playback error:', e);
           setIsPlaying(false);
-          resumeSTTRef.current?.();
+          setTimeout(() => {
+            isTTSPlayingRef.current = false;
+            resumeSTTRef.current?.();
+          }, 500);
           import('sonner').then(({ toast }) => toast.error('音频播放失败'));
         };
         
@@ -310,6 +319,11 @@ export function useSimpleVoiceCall({
   } = useWebSpeechSTT({
     language: 'zh-CN',
     onResult: useCallback((transcript: string, isFinal: boolean) => {
+      // TTS 播放中忽略所有识别结果，防止回声
+      if (isTTSPlayingRef.current) {
+        console.log('[STT] Ignoring result during TTS playback:', transcript.substring(0, 30));
+        return;
+      }
       if (isFinal) {
         if (transcript.trim() && isConnectedRef.current) {
           console.log('[Voice] Sending final transcript:', transcript.trim());
