@@ -30,6 +30,7 @@ export const RealtimeCallPanel: React.FC<RealtimeCallPanelProps> = ({
   const [inputText, setInputText] = useState('');
   const [showTextInput, setShowTextInput] = useState(false);
   const [callMode, setCallMode] = useState<CallMode>('voice');
+  const [sttBackend, setSttBackend] = useState<'auto' | 'webspeech' | 'sherpa-onnx'>('auto');
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
   const [callDuration, setCallDuration] = useState(0);
@@ -81,6 +82,7 @@ ${settings.character.background}
     systemPrompt: buildSystemPrompt(),
     onSpeakingChange,
     onAudioResponse,
+    sttBackend,
   });
 
   // 更新最后活动时间（用户说话或AI回复时）
@@ -570,6 +572,32 @@ ${settings.character.background}
               </button>
             </div>
             
+            {/* STT 引擎切换 */}
+            <div className="flex items-center gap-2 bg-muted rounded-full p-1">
+              <button
+                onClick={() => setSttBackend('auto')}
+                className={cn(
+                  "px-3 py-1.5 rounded-full text-xs transition-colors",
+                  sttBackend === 'auto'
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                自动
+              </button>
+              <button
+                onClick={() => setSttBackend('sherpa-onnx')}
+                className={cn(
+                  "px-3 py-1.5 rounded-full text-xs transition-colors",
+                  sttBackend === 'sherpa-onnx'
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                离线识别
+              </button>
+            </div>
+
             {/* 开始通话按钮 */}
             <Button
               onClick={handleStartCall}
