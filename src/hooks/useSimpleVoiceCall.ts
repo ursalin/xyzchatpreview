@@ -23,10 +23,91 @@ export function useSimpleVoiceCall({
   const [interimTranscript, setInterimTranscript] = useState('');
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const pendingTranscriptRef = useRef<string>('');
+  // 用 ref 保存最新的 messages，避免闭包过期
+  const messagesRef = useRef<Message[]>([]);
+  const isConnectedRef = useRef(false);
+  const systemPromptRef = useRef(systemPrompt);
 
-  // 发送消息给 AI
+  // 同步 state 到 ref
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    isConnectedRef.current = isConnected;
+  }, [isConnected]);
+
+  useEffect(() => {
+    systemPromptRef.current = systemPrompt;
+  }, [systemPrompt]);
+
+  // TTS 播放（用 useCallback 但通过 ref 读取 settings）
+  const settingsRef = useRef(settings);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
+
+  const speak = useCallback(async (text: string) => {
+    const { voiceConfig } = settingsRef.current;
+    if (!voiceConfig.enabled || !voiceConfig.minimaxApiKey || !voiceConfig.minimaxGroupId) {
+      console.log('Voice not enabled or missing config, skipping TTS');
+      return;
+    }
+
+    const textToSpeak = removeParenthesesContent(text);
+    if (!textToSpeak) return;
+
+    try {
+      console.log('Generating TTS audio...');
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/minimax-tts`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          },
+          body: JSON.stringify({
+            text: textToSpeak,
+            apiKey: voiceConfig.minimaxApiKey,
+            groupId: voiceConfig.minimaxGroupId,
+            voiceId: voiceConfig.voiceId,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+        throw new Error(error.error || `TTS request failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.audioContent) {
+        onAudioResponse?.(data.audioContent);
+        
+        const audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
+        const audio = new Audio(audioUrl);
+        audioRef.current = audio;
+        
+        audio.onplay = () => setIsPlaying(true);
+        audio.onended = () => setIsPlaying(false);
+        audio.onerror = () => setIsPlaying(false);
+        
+        await audio.play();
+      }
+    } catch (error) {
+      console.error('TTS error:', error);
+    }
+  }, [onAudioResponse]);
+
+  // 发送消息给 AI（不依赖 messages state，用 ref 读取）
   const sendMessageToAI = useCallback(async (content: string) => {
+    if (isLoading) {
+      console.log('Already loading, skipping duplicate send');
+      return null;
+    }
+
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: 'user',
@@ -38,6 +119,8 @@ export function useSimpleVoiceCall({
     setIsLoading(true);
 
     try {
+      // 用 ref 读取最新 messages 构建上下文
+      const currentMessages = messagesRef.current;
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`,
         {
@@ -47,17 +130,19 @@ export function useSimpleVoiceCall({
             'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
           },
           body: JSON.stringify({
-            messages: [...messages, userMessage].slice(-20).map(m => ({
+            messages: [...currentMessages, userMessage].slice(-20).map(m => ({
               role: m.role,
               content: m.content,
             })),
-            systemPrompt,
+            systemPrompt: systemPromptRef.current,
           }),
         }
       );
 
       if (!response.ok) {
-        throw new Error('AI 回复失败');
+        const errorText = await response.text().catch(() => `HTTP ${response.status}`);
+        console.error('Chat API error:', response.status, errorText);
+        throw new Error(`AI 回复失败 (${response.status})`);
       }
 
       const reader = response.body?.getReader();
@@ -111,6 +196,7 @@ export function useSimpleVoiceCall({
               );
             }
           } catch {
+            // 不完整的 JSON，放回 buffer
             textBuffer = line + '\n' + textBuffer;
             break;
           }
@@ -118,7 +204,7 @@ export function useSimpleVoiceCall({
       }
 
       // 自动播放 TTS
-      if (assistantContent && settings.voiceConfig.enabled) {
+      if (assistantContent && settingsRef.current.voiceConfig.enabled) {
         await speak(assistantContent);
       }
 
@@ -136,7 +222,13 @@ export function useSimpleVoiceCall({
     } finally {
       setIsLoading(false);
     }
-  }, [messages, systemPrompt, settings]);
+  }, [isLoading, speak]);
+
+  // 用 ref 保存 sendMessageToAI，让 STT 回调始终调用最新版本
+  const sendMessageToAIRef = useRef(sendMessageToAI);
+  useEffect(() => {
+    sendMessageToAIRef.current = sendMessageToAI;
+  }, [sendMessageToAI]);
 
   // 使用 Web Speech API 进行语音识别
   const {
@@ -147,22 +239,21 @@ export function useSimpleVoiceCall({
     stopListening,
   } = useWebSpeechSTT({
     language: 'zh-CN',
-    onResult: (transcript, isFinal) => {
+    onResult: useCallback((transcript: string, isFinal: boolean) => {
       if (isFinal) {
-        if (transcript.trim() && isConnected) {
-          sendMessageToAI(transcript.trim());
+        if (transcript.trim() && isConnectedRef.current) {
+          console.log('[Voice] Sending final transcript:', transcript.trim());
+          sendMessageToAIRef.current(transcript.trim());
         }
         setInterimTranscript('');
-        pendingTranscriptRef.current = '';
       } else {
         setInterimTranscript(transcript);
-        pendingTranscriptRef.current = transcript;
       }
-    },
-    onError: (error) => {
+    }, []),
+    onError: useCallback((error: string) => {
       console.error('[STT Error]', error);
       setInterimTranscript('');
-    },
+    }, []),
   });
 
   // 同步临时识别结果
@@ -174,63 +265,6 @@ export function useSimpleVoiceCall({
   useEffect(() => {
     onSpeakingChange?.(isPlaying);
   }, [isPlaying, onSpeakingChange]);
-
-  // TTS 播放
-  const speak = useCallback(async (text: string) => {
-    const { voiceConfig } = settings;
-    if (!voiceConfig.enabled || !voiceConfig.minimaxApiKey || !voiceConfig.minimaxGroupId) {
-      console.log('Voice not enabled or missing config');
-      return;
-    }
-
-    const textToSpeak = removeParenthesesContent(text);
-    if (!textToSpeak) return;
-
-    try {
-      console.log('Generating TTS audio...');
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/minimax-tts`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({
-            text: textToSpeak,
-            apiKey: voiceConfig.minimaxApiKey,
-            groupId: voiceConfig.minimaxGroupId,
-            voiceId: voiceConfig.voiceId,
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'TTS request failed');
-      }
-
-      const data = await response.json();
-      
-      if (data.audioContent) {
-        // 传递音频给父组件（用于动画同步）
-        onAudioResponse?.(data.audioContent);
-        
-        // 播放音频
-        const audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
-        const audio = new Audio(audioUrl);
-        audioRef.current = audio;
-        
-        audio.onplay = () => setIsPlaying(true);
-        audio.onended = () => setIsPlaying(false);
-        audio.onerror = () => setIsPlaying(false);
-        
-        await audio.play();
-      }
-    } catch (error) {
-      console.error('TTS error:', error);
-    }
-  }, [settings, onAudioResponse]);
 
   // 停止播放
   const stopPlaying = useCallback(() => {
@@ -261,10 +295,10 @@ export function useSimpleVoiceCall({
 
   // 开始录音
   const startRecording = useCallback(() => {
-    if (isConnected) {
+    if (isConnectedRef.current) {
       startListening();
     }
-  }, [isConnected, startListening]);
+  }, [startListening]);
 
   // 停止录音
   const stopRecording = useCallback(() => {
@@ -273,10 +307,10 @@ export function useSimpleVoiceCall({
 
   // 发送文字消息
   const sendTextMessage = useCallback((text: string) => {
-    if (text.trim() && isConnected) {
-      sendMessageToAI(text.trim());
+    if (text.trim() && isConnectedRef.current) {
+      sendMessageToAIRef.current(text.trim());
     }
-  }, [isConnected, sendMessageToAI]);
+  }, []);
 
   // 清空消息
   const clearMessages = useCallback(() => {
