@@ -1,13 +1,17 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Message, AppSettings, defaultVoiceConfig } from '@/types/chat';
 import { useWebSpeechSTT } from './useWebSpeechSTT';
+import { useSherpaOnnxSTT } from './useSherpaOnnxSTT';
 import { removeParenthesesContent } from '@/lib/textUtils';
+
+export type STTBackend = 'webspeech' | 'sherpa-onnx' | 'auto';
 
 interface UseSimpleVoiceCallOptions {
   settings: AppSettings;
   systemPrompt: string;
   onSpeakingChange?: (isSpeaking: boolean) => void;
   onAudioResponse?: (audioBase64: string) => void;
+  sttBackend?: STTBackend;
 }
 
 export function useSimpleVoiceCall({
@@ -15,12 +19,18 @@ export function useSimpleVoiceCall({
   systemPrompt,
   onSpeakingChange,
   onAudioResponse,
+  sttBackend = 'auto',
 }: UseSimpleVoiceCallOptions) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState('');
+  // Fallback 状态：当 Web Speech API 失败时切换到 sherpa-onnx
+  const [useFallback, setUseFallback] = useState(false);
+  // Web Speech API 首次启动失败检测计时器
+  const webSpeechTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const webSpeechStartedRef = useRef(false);
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
   // 用 ref 保存最新的 messages，避免闭包过期
@@ -309,55 +319,119 @@ export function useSimpleVoiceCall({
     sendMessageToAIRef.current = sendMessageToAI;
   }, [sendMessageToAI]);
 
-  // 使用 Web Speech API 进行语音识别
-  const {
-    isListening: isRecording,
-    isSupported: isSpeechSupported,
-    interimTranscript: webSpeechInterim,
-    startListening,
-    stopListening,
-  } = useWebSpeechSTT({
+  // ============================================================
+  // STT 回调（共用于 Web Speech API 和 sherpa-onnx）
+  // ============================================================
+  const handleSTTResult = useCallback((transcript: string, isFinal: boolean) => {
+    // TTS 播放中忽略所有识别结果，防止回声
+    if (isTTSPlayingRef.current) {
+      console.log('[STT] Ignoring result during TTS playback:', transcript.substring(0, 30));
+      return;
+    }
+    if (isFinal) {
+      if (transcript.trim() && isConnectedRef.current) {
+        console.log('[Voice] Sending final transcript:', transcript.trim());
+        sendMessageToAIRef.current(transcript.trim());
+      }
+      setInterimTranscript('');
+    } else {
+      setInterimTranscript(transcript);
+    }
+  }, []);
+
+  const handleSTTError = useCallback((error: string) => {
+    console.error('[STT Error]', error);
+    setInterimTranscript('');
+  }, []);
+
+  // ============================================================
+  // Web Speech API STT
+  // ============================================================
+  const webSpeech = useWebSpeechSTT({
     language: 'zh-CN',
     onResult: useCallback((transcript: string, isFinal: boolean) => {
-      // TTS 播放中忽略所有识别结果，防止回声
-      if (isTTSPlayingRef.current) {
-        console.log('[STT] Ignoring result during TTS playback:', transcript.substring(0, 30));
-        return;
+      // 收到结果说明 Web Speech API 确实在工作
+      webSpeechStartedRef.current = true;
+      if (webSpeechTimeoutRef.current) {
+        clearTimeout(webSpeechTimeoutRef.current);
+        webSpeechTimeoutRef.current = null;
       }
-      if (isFinal) {
-        if (transcript.trim() && isConnectedRef.current) {
-          console.log('[Voice] Sending final transcript:', transcript.trim());
-          sendMessageToAIRef.current(transcript.trim());
-        }
-        setInterimTranscript('');
-      } else {
-        setInterimTranscript(transcript);
-      }
-    }, []),
+      handleSTTResult(transcript, isFinal);
+    }, [handleSTTResult]),
     onError: useCallback((error: string) => {
-      console.error('[STT Error]', error);
-      setInterimTranscript('');
-    }, []),
+      console.error('[WebSpeech STT Error]', error);
+      // 如果是 auto 模式且 Web Speech API 出错，切换到 sherpa-onnx
+      if (error.includes('不支持') || error.includes('service-not-allowed') || error.includes('not-allowed')) {
+        console.log('[STT] Web Speech API failed, switching to sherpa-onnx fallback');
+        setUseFallback(true);
+        import('sonner').then(({ toast }) => toast.info('正在切换到离线语音识别...'));
+      }
+      handleSTTError(error);
+    }, [handleSTTError]),
   });
+
+  // ============================================================
+  // sherpa-onnx WASM STT (fallback)
+  // ============================================================
+  const sherpaOnnx = useSherpaOnnxSTT({
+    language: 'zh-CN',
+    onResult: handleSTTResult,
+    onError: handleSTTError,
+  });
+
+  // ============================================================
+  // 决定当前使用哪个 STT 后端
+  // ============================================================
+  const shouldUseSherpa = 
+    sttBackend === 'sherpa-onnx' || 
+    (sttBackend === 'auto' && (!webSpeech.isSupported || useFallback));
+
+  // 当前活跃的 STT 接口
+  const activeSTT = shouldUseSherpa ? {
+    isListening: sherpaOnnx.isListening,
+    isSupported: sherpaOnnx.isSupported,
+    interimTranscript: sherpaOnnx.interimTranscript,
+    startListening: sherpaOnnx.startListening,
+    stopListening: sherpaOnnx.stopListening,
+    abortListening: sherpaOnnx.abortListening,
+  } : {
+    isListening: webSpeech.isListening,
+    isSupported: webSpeech.isSupported,
+    interimTranscript: webSpeech.interimTranscript,
+    startListening: webSpeech.startListening,
+    stopListening: webSpeech.stopListening,
+    abortListening: webSpeech.abortListening,
+  };
+
+  const isRecording = activeSTT.isListening;
+  const isSpeechSupported = shouldUseSherpa ? sherpaOnnx.isSupported : webSpeech.isSupported || sherpaOnnx.isSupported;
+
+  // 在 auto 模式下，如果 Web Speech API isSupported 为 false，直接设置 fallback
+  useEffect(() => {
+    if (sttBackend === 'auto' && !webSpeech.isSupported && !useFallback) {
+      console.log('[STT] Web Speech API not supported, using sherpa-onnx');
+      setUseFallback(true);
+    }
+  }, [sttBackend, webSpeech.isSupported, useFallback]);
 
   // 绑定 STT 暂停/恢复到 ref，供 speak() 使用
   useEffect(() => {
     pauseSTTRef.current = () => {
       console.log('[STT] Pausing for TTS playback');
-      stopListening();
+      activeSTT.stopListening();
     };
     resumeSTTRef.current = () => {
       if (isConnectedRef.current) {
         console.log('[STT] Resuming after TTS playback');
-        setTimeout(() => startListening(), 300);
+        setTimeout(() => activeSTT.startListening(), 300);
       }
     };
-  }, [stopListening, startListening]);
+  }, [activeSTT.stopListening, activeSTT.startListening]);
 
   // 同步临时识别结果
   useEffect(() => {
-    setInterimTranscript(webSpeechInterim);
-  }, [webSpeechInterim]);
+    setInterimTranscript(activeSTT.interimTranscript);
+  }, [activeSTT.interimTranscript]);
 
   // 通知父组件说话状态
   useEffect(() => {
@@ -376,32 +450,60 @@ export function useSimpleVoiceCall({
   // 开始通话
   const connect = useCallback(async () => {
     if (!isSpeechSupported) {
-      console.error('Web Speech API not supported');
+      console.error('No STT backend available');
       return false;
     }
+
     setIsConnected(true);
-    startListening();
+
+    // 在 auto 模式下，如果使用 Web Speech API，设置超时检测
+    if (sttBackend === 'auto' && !shouldUseSherpa) {
+      webSpeechStartedRef.current = false;
+      activeSTT.startListening();
+      
+      // 3 秒后检查 Web Speech API 是否真正启动了
+      webSpeechTimeoutRef.current = setTimeout(() => {
+        if (!webSpeechStartedRef.current && isConnectedRef.current) {
+          console.log('[STT] Web Speech API did not start within 3s, switching to sherpa-onnx');
+          webSpeech.stopListening();
+          setUseFallback(true);
+          import('sonner').then(({ toast }) => toast.info('正在切换到离线语音识别...'));
+          // sherpa-onnx 会在下次 startListening 时自动加载模型
+          setTimeout(() => sherpaOnnx.startListening(), 500);
+        }
+      }, 3000);
+    } else {
+      activeSTT.startListening();
+    }
+
     return true;
-  }, [isSpeechSupported, startListening]);
+  }, [isSpeechSupported, sttBackend, shouldUseSherpa, activeSTT, webSpeech, sherpaOnnx]);
 
   // 结束通话
   const disconnect = useCallback(() => {
-    stopListening();
+    // 清除超时检测
+    if (webSpeechTimeoutRef.current) {
+      clearTimeout(webSpeechTimeoutRef.current);
+      webSpeechTimeoutRef.current = null;
+    }
+    // 停止两个 STT 后端（确保都清理）
+    webSpeech.stopListening();
+    sherpaOnnx.stopListening();
     stopPlaying();
     setIsConnected(false);
-  }, [stopListening, stopPlaying]);
+  }, [webSpeech, sherpaOnnx, stopPlaying]);
 
   // 开始录音
   const startRecording = useCallback(() => {
     if (isConnectedRef.current) {
-      startListening();
+      activeSTT.startListening();
     }
-  }, [startListening]);
+  }, [activeSTT]);
 
   // 停止录音
   const stopRecording = useCallback(() => {
-    stopListening();
-  }, [stopListening]);
+    activeSTT.stopListening();
+  }, [activeSTT]);
 
   // 发送文字消息
   const sendTextMessage = useCallback((text: string) => {
@@ -430,5 +532,10 @@ export function useSimpleVoiceCall({
     sendTextMessage,
     clearMessages,
     stopPlaying,
+    // 新增：暴露 fallback 相关状态
+    sttBackendActive: shouldUseSherpa ? 'sherpa-onnx' as const : 'webspeech' as const,
+    isSherpaModelLoading: sherpaOnnx.isModelLoading,
+    isSherpaModelReady: sherpaOnnx.isModelReady,
+    sherpaLoadingStatus: sherpaOnnx.loadingStatus,
   };
 }
