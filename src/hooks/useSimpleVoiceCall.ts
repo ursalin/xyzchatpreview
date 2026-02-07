@@ -27,6 +27,9 @@ export function useSimpleVoiceCall({
   const messagesRef = useRef<Message[]>([]);
   const isConnectedRef = useRef(false);
   const systemPromptRef = useRef(systemPrompt);
+  // STT 暂停/恢复控制，在 TTS 播放时暂停，防止回声
+  const pauseSTTRef = useRef<(() => void) | null>(null);
+  const resumeSTTRef = useRef<(() => void) | null>(null);
 
   // 同步 state 到 ref
   useEffect(() => {
@@ -133,10 +136,13 @@ export function useSimpleVoiceCall({
         console.log('[TTS] Got audio, length:', audioBase64.length);
         onAudioResponse?.(audioBase64);
         
-        const audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
+        const audioUrl = `data:audio/mpeg;base64,${audioBase64}`;
         const audio = new Audio(audioUrl);
         audioRef.current = audio;
         
+        // 播放前暂停 STT，防止角色声音被识别成用户输入
+        pauseSTTRef.current?.();
+
         audio.onplay = () => {
           console.log('[TTS] Audio playing');
           setIsPlaying(true);
@@ -144,16 +150,19 @@ export function useSimpleVoiceCall({
         audio.onended = () => {
           console.log('[TTS] Audio ended');
           setIsPlaying(false);
+          // 播完恢复 STT
+          resumeSTTRef.current?.();
         };
         audio.onerror = (e) => {
           console.error('[TTS] Audio playback error:', e);
           setIsPlaying(false);
+          resumeSTTRef.current?.();
           import('sonner').then(({ toast }) => toast.error('音频播放失败'));
         };
         
         await audio.play();
       } else {
-        console.error('[TTS] No audioContent in response:', data);
+        console.error('[TTS] No audio data in response');
         import('sonner').then(({ toast }) => toast.error('语音合成返回空数据'));
       }
     } catch (error) {
@@ -316,6 +325,20 @@ export function useSimpleVoiceCall({
       setInterimTranscript('');
     }, []),
   });
+
+  // 绑定 STT 暂停/恢复到 ref，供 speak() 使用
+  useEffect(() => {
+    pauseSTTRef.current = () => {
+      console.log('[STT] Pausing for TTS playback');
+      stopListening();
+    };
+    resumeSTTRef.current = () => {
+      if (isConnectedRef.current) {
+        console.log('[STT] Resuming after TTS playback');
+        setTimeout(() => startListening(), 300);
+      }
+    };
+  }, [stopListening, startListening]);
 
   // 同步临时识别结果
   useEffect(() => {
