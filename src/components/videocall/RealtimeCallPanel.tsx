@@ -58,7 +58,7 @@ ${settings.character.background}
     return prompt;
   }, [settings.character, callMode]);
 
-  // 使用简化的语音通话 hook (Web Speech API + MiniMax TTS)
+  // 使用简化的语音通话 hook (Web Speech API + sherpa-onnx fallback + MiniMax TTS)
   const {
     messages,
     isLoading,
@@ -73,6 +73,9 @@ ${settings.character.background}
     stopRecording,
     sendTextMessage,
     clearMessages,
+    sttBackendActive,
+    isSherpaModelLoading,
+    sherpaLoadingStatus,
   } = useSimpleVoiceCall({
     settings,
     systemPrompt: buildSystemPrompt(),
@@ -357,7 +360,7 @@ ${settings.character.background}
     
     const success = await connect();
     if (!success) {
-      toast.error('无法启动语音识别，请使用 Chrome 或 Edge 浏览器');
+      toast.error('无法启动语音识别');
       return;
     }
     
@@ -428,11 +431,32 @@ ${settings.character.background}
 
       {/* 消息区域 */}
       <div className="flex-1 overflow-y-auto p-4 pt-14 space-y-3">
+        {/* sherpa-onnx 模型加载状态提示 */}
+        {isSherpaModelLoading && (
+          <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 mb-3">
+            <p className="text-sm text-blue-600">
+              {sherpaLoadingStatus || '正在加载离线语音识别模型...'}
+            </p>
+            <p className="text-xs text-blue-500 mt-1">
+              首次使用需下载约200MB模型，请耐心等待
+            </p>
+          </div>
+        )}
+
+        {/* STT 后端指示 */}
+        {isConnected && sttBackendActive === 'sherpa-onnx' && !isSherpaModelLoading && (
+          <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3 mb-3">
+            <p className="text-xs text-emerald-600">
+              🔧 使用离线语音识别 (sherpa-onnx)
+            </p>
+          </div>
+        )}
+
         {/* 浏览器不支持提示 */}
         {!isSpeechSupported && (
           <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 mb-3">
             <p className="text-sm text-amber-600">
-              你的浏览器不支持语音识别，请使用 Chrome 或 Edge 浏览器。
+              语音识别服务不可用。
             </p>
           </div>
         )}
