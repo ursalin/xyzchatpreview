@@ -438,7 +438,7 @@ ${settings.character.background}
               {sherpaLoadingStatus || '正在加载离线语音识别模型...'}
             </p>
             <p className="text-xs text-blue-500 mt-1">
-              首次使用需下载约200MB模型，请耐心等待
+              首次使用需下载约90MB模型，请耐心等待（之后秒开）
             </p>
           </div>
         )}
