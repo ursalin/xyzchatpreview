@@ -145,12 +145,15 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     updateMemorySummary,
   } = useMemoryManager();
 
+  // 用 ref 保存 sendMessage，避免 STT 回调闭包过期
+  const sendMessageRef = useRef<(content: string, includeImage?: boolean) => Promise<void>>(null as any);
+
   // STT 回调
   const handleSTTResult = useCallback((transcript: string, isFinal: boolean) => {
     if (isFinal) {
       // 最终结果，发送消息
       if (transcript.trim()) {
-        sendMessage(transcript.trim(), true);
+        sendMessageRef.current?.(transcript.trim(), true);
       }
       setInterimTranscript('');
       pendingTranscriptRef.current = '';
@@ -720,6 +723,11 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
       setIsLoading(false);
     }
   }, [messages, systemPrompt, captureFrame, settings, speak, checkAndSummarize, buildContextMessages]);
+
+  // 同步 sendMessage 到 ref，让 STT 回调始终调用最新版本
+  useEffect(() => {
+    sendMessageRef.current = sendMessage;
+  }, [sendMessage]);
 
   // 清除消息
   const clearMessages = useCallback(() => {

@@ -21,6 +21,8 @@ export function useXunfeiSTT({
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const isStoppedRef = useRef(false);
+  // 动态修正(wpgs)需要按 sn 存储每段结果，最后拼接
+  const resultMapRef = useRef<Map<number, string>>(new Map());
 
   // 讯飞 API 配置（需要在环境变量中配置）
   const XUNFEI_APP_ID = import.meta.env.VITE_XUNFEI_APP_ID || '';
@@ -173,21 +175,50 @@ export function useXunfeiSTT({
           }
 
           if (result.data?.result) {
-            const ws = result.data.result.ws;
-            let transcript = '';
+            const data = result.data.result;
+            const sn = data.sn; // 结果序号
+            const pgs = data.pgs; // "apd"=追加, "rpl"=替换
+            const rg = data.rg; // 替换范围 [start, end]
             
-            ws.forEach((word: any) => {
-              word.cw.forEach((char: any) => {
-                transcript += char.w;
+            // 拼接当前片段文字
+            let segText = '';
+            if (data.ws) {
+              data.ws.forEach((word: any) => {
+                word.cw.forEach((char: any) => {
+                  segText += char.w;
+                });
               });
-            });
+            }
+
+            // 动态修正处理
+            if (pgs === 'rpl' && rg) {
+              // 替换模式：删除 rg[0] 到 rg[1] 范围内的旧结果
+              for (let i = rg[0]; i <= rg[1]; i++) {
+                resultMapRef.current.delete(i);
+              }
+            }
+            // 存入当前 sn 的结果
+            resultMapRef.current.set(sn, segText);
+
+            // 拼接所有结果得到完整文本
+            const sortedKeys = Array.from(resultMapRef.current.keys()).sort((a, b) => a - b);
+            let fullTranscript = '';
+            for (const key of sortedKeys) {
+              fullTranscript += resultMapRef.current.get(key) || '';
+            }
 
             const isFinal = result.data.status === 2;
             
-            if (transcript) {
-              console.log('[Xunfei STT] Result:', transcript, 'isFinal:', isFinal);
-              setInterimTranscript(isFinal ? '' : transcript);
-              onResult(transcript, isFinal);
+            console.log('[Xunfei STT] sn:', sn, 'pgs:', pgs, 'seg:', segText, 'full:', fullTranscript, 'isFinal:', isFinal);
+            
+            if (fullTranscript) {
+              setInterimTranscript(isFinal ? '' : fullTranscript);
+              onResult(fullTranscript, isFinal);
+            }
+
+            // 识别结束后清空 resultMap
+            if (isFinal) {
+              resultMapRef.current.clear();
             }
           }
         } catch (error) {
