@@ -77,11 +77,24 @@ export function useMemoryManager() {
               messages: [
                 {
                   role: 'user',
-                  content: `请将以下对话总结成简短的记忆摘要（200字以内），保留关键信息、情感和重要细节：\n\n${conversationText}`,
+                  content: `请将以下对话提炼成角色记忆笔记（150字以内）。
+
+要求：
+1. 记录你对用户的认知（性格、喜好、习惯、称呼）
+2. 记录重要事项（用户提到的计划、承诺、心情）
+3. 记录你们关系的进展（亲密度、默契、共同话题）
+4. 不要复述对话内容，只提炼关键认知
+5. 用第一人称（"我"）书写，像写日记一样
+
+格式示例：
+"用户喜欢被叫宝贝，今天心情不太好因为工作压力大。她提到周末想出去玩，对猫很感兴趣。我们聊到了小时候的趣事，感觉更亲近了。"
+
+对话内容：
+${conversationText}`,
                 },
               ],
               systemPrompt:
-                '你是一个专业的对话总结助手。请用简洁的语言总结对话要点，保留关键信息和情感色彩。',
+                '你是一个角色的记忆系统。用最精炼的语言记录对用户的认知和重要事项，像写私人日记一样。不要列举对话，只记住重要的东西。',
             }),
           }
         );
@@ -167,9 +180,26 @@ export function useMemoryManager() {
           apiKey
         );
 
-        // 合并新旧摘要
+        // 合并新旧摘要（去重+精炼）
         if (summaryText) {
-          summaryText = `${summaryText}\n\n[新增记忆]\n${newSummary}`;
+          // 如果合并后太长（超过400字），需要重新精炼
+          const merged = `${summaryText}\n${newSummary}`;
+          if (merged.length > 400) {
+            // 调用 API 精炼合并
+            const refinedSummary = await summarizeMessages(
+              [{
+                id: 'merge',
+                role: 'user' as const,
+                content: `请将以下记忆笔记合并精炼为一份（200字以内），去掉重复内容，只保留最重要的认知：\n\n旧记忆：${summaryText}\n\n新记忆：${newSummary}`,
+                timestamp: new Date(),
+              }],
+              apiEndpoint,
+              apiKey
+            );
+            summaryText = refinedSummary;
+          } else {
+            summaryText = merged;
+          }
         } else {
           summaryText = newSummary;
         }
