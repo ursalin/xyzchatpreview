@@ -219,6 +219,21 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     onSpeakingChange?.(isPlaying);
   }, [isPlaying, onSpeakingChange]);
 
+  // TTS 播放前暂停 STT，播完后自动恢复
+  const wasPlayingRef = useRef(false);
+  useEffect(() => {
+    if (isPlaying && !wasPlayingRef.current) {
+      // TTS 开始播放 → 暂停 STT
+      console.log('[VideoCall] TTS started, pausing STT');
+      stopListening();
+    } else if (!isPlaying && wasPlayingRef.current) {
+      // TTS 播完 → 恢复 STT
+      console.log('[VideoCall] TTS ended, resuming STT');
+      setTimeout(() => startListening(), 300);
+    }
+    wasPlayingRef.current = isPlaying;
+  }, [isPlaying, stopListening, startListening]);
+
   // 启动摄像头
   const startCamera = useCallback(async (videoElement: HTMLVideoElement) => {
     try {
