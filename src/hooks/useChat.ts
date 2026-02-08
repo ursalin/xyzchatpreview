@@ -66,12 +66,13 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
     }
   }, [messages]);
 
-  const sendMessage = useCallback(async (content: string) => {
+  const sendMessage = useCallback(async (content: string, imageUrl?: string) => {
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: 'user',
       content,
       timestamp: new Date(),
+      imageUrl,
     };
 
     setMessages(prev => [...prev, userMessage]);
@@ -91,6 +92,24 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
       // 构建上下文消息（包含记忆摘要 + 最近消息）
       const contextMessages = buildContextMessages(allMessages);
       
+      // 如果最后一条消息有图片，构建 vision 格式
+      const apiMessages = contextMessages.map((msg, idx) => {
+        // 只对最后一条用户消息（带图片的）做 vision 格式
+        if (idx === contextMessages.length - 1 && imageUrl && msg.role === 'user') {
+          return {
+            role: msg.role,
+            content: [
+              { type: 'text', text: msg.content },
+              { 
+                type: 'image_url', 
+                image_url: { url: imageUrl, detail: 'low' }
+              },
+            ],
+          };
+        }
+        return msg;
+      });
+
       // Determine API endpoint and headers
       let apiUrl: string;
       let headers: Record<string, string>;
@@ -107,7 +126,7 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
           model: apiConfig.model || 'gpt-4o',
           messages: [
             { role: 'system', content: systemPrompt },
-            ...contextMessages,
+            ...apiMessages,
           ],
           stream: true,
         };

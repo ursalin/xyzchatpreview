@@ -89,6 +89,14 @@ export function ChatMessage({
             </Button>
           )}
         </div>
+        {message.imageUrl && (
+          <img 
+            src={message.imageUrl} 
+            alt="图片" 
+            className="mt-2 rounded-lg max-h-48 object-cover cursor-pointer"
+            onClick={() => window.open(message.imageUrl, '_blank')}
+          />
+        )}
         <p className="whitespace-pre-wrap break-words">{message.content}</p>
       </div>
     </div>

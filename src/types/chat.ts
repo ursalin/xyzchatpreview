@@ -3,6 +3,7 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  imageUrl?: string; // base64 data URL
 }
 
 export interface Personality {
