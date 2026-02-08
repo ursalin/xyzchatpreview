@@ -517,7 +517,10 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
           
           // 将音频数据传递给预设动画系统，由它来处理同步播放
           if (onPresetAnimationTrigger) {
-            onPresetAnimationTrigger(data.audioContent);
+            stopListening();
+            await onPresetAnimationTrigger(data.audioContent);
+            // 动画+音频播完，恢复 STT
+            setTimeout(() => startListening(), 300);
           } else {
             // 后备：如果没有预设动画处理器，直接播放音频
             const audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
