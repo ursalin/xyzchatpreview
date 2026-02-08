@@ -26,6 +26,8 @@ const VideoCall = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastActivityRef = useRef<number>(Date.now());
 
   // 获取当前时间信息
   const now = new Date();
@@ -65,6 +67,37 @@ const VideoCall = () => {
     },
   });
 
+  // 静默检测：8秒没有活动（说话/回复），角色自动问候
+  const SILENCE_TIMEOUT = 8000;
+
+  // 重置静默计时器
+  const resetSilenceTimer = useCallback(() => {
+    lastActivityRef.current = Date.now();
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+    }
+    if (isInCall && !isLoading && !isPlaying) {
+      silenceTimerRef.current = setTimeout(() => {
+        if (!isLoading && !isPlaying && isInCall) {
+          console.log('[VideoCall] Silence detected, sending auto greeting');
+          sendMessage('（用户沉默了一会儿，请主动关心一下或者随便聊点什么）', true);
+        }
+      }, SILENCE_TIMEOUT);
+    }
+  }, [isInCall, isLoading, isPlaying, sendMessage]);
+
+  // 消息变化、录音状态变化时重置计时器
+  useEffect(() => {
+    if (isInCall) {
+      resetSilenceTimer();
+    }
+    return () => {
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+      }
+    };
+  }, [messages, isRecording, isPlaying, isInCall, resetSilenceTimer]);
+
   // 格式化通话时长
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -102,6 +135,10 @@ const VideoCall = () => {
     if (callTimerRef.current) {
       clearInterval(callTimerRef.current);
       callTimerRef.current = null;
+    }
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
     }
     // 返回主页
     navigate('/');

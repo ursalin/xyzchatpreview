@@ -723,7 +723,11 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
 
       // 自动播放TTS
       if (assistantContent && settings.voiceConfig.enabled) {
+        stopListening();
         await speak(assistantContent);
+        // TTS 播完，恢复 STT
+        console.log('[VideoCall] speak() done, resuming STT in 500ms');
+        setTimeout(() => startListening(), 500);
       }
 
       return assistantContent;
@@ -740,7 +744,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     } finally {
       setIsLoading(false);
     }
-  }, [messages, systemPrompt, captureFrame, settings, speak, checkAndSummarize, buildContextMessages]);
+  }, [messages, systemPrompt, captureFrame, settings, speak, checkAndSummarize, buildContextMessages, stopListening, startListening]);
 
   // 同步 sendMessage 到 ref，让 STT 回调始终调用最新版本
   useEffect(() => {
