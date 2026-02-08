@@ -1,15 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import lockscreenImg from '@/assets/lockscreen.jpg';
-
-const UNLOCKED_KEY = 'app-unlocked';
 
 const LockScreen = () => {
   const navigate = useNavigate();
   const [unlocking, setUnlocking] = useState(false);
   const [showHint, setShowHint] = useState(false);
-  const [ripple, setRipple] = useState<{ x: number; y: number } | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const touchStartY = useRef<number | null>(null);
 
   // 更新时间
   useEffect(() => {
@@ -17,40 +15,36 @@ const LockScreen = () => {
     return () => clearInterval(timer);
   }, []);
 
-  // 3秒后显示提示
+  // 2秒后显示提示
   useEffect(() => {
-    const timer = setTimeout(() => setShowHint(true), 3000);
+    const timer = setTimeout(() => setShowHint(true), 2000);
     return () => clearTimeout(timer);
   }, []);
 
-  const handleUnlock = (e: React.MouseEvent<HTMLDivElement>) => {
+  const doUnlock = () => {
     if (unlocking) return;
-    
-    // 获取点击位置的百分比
-    const rect = e.currentTarget.getBoundingClientRect();
-    const xPercent = ((e.clientX - rect.left) / rect.width) * 100;
-    const yPercent = ((e.clientY - rect.top) / rect.height) * 100;
+    setUnlocking(true);
+    setTimeout(() => navigate('/home'), 800);
+  };
 
-    // 苹果大致在底部中间：x 35-65%, y 75-95%
-    const isAppleArea = xPercent > 25 && xPercent < 75 && yPercent > 70 && yPercent < 98;
+  // 上滑解锁
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartY.current = e.touches[0].clientY;
+  };
 
-    // 设置涟漪效果位置
-    setRipple({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-
-    if (isAppleArea) {
-      setUnlocking(true);
-      // 存储解锁状态
-      sessionStorage.setItem(UNLOCKED_KEY, 'true');
-      // 延迟导航，让动画播放
-      setTimeout(() => {
-        navigate('/home');
-      }, 800);
-    } else {
-      // 非目标区域点击：显示提示
-      setShowHint(true);
-      // 涟漪消散
-      setTimeout(() => setRipple(null), 600);
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartY.current === null) return;
+    const deltaY = touchStartY.current - e.changedTouches[0].clientY;
+    touchStartY.current = null;
+    // 上滑超过 80px 解锁
+    if (deltaY > 80) {
+      doUnlock();
     }
+  };
+
+  // 点击也可以解锁
+  const handleClick = () => {
+    doUnlock();
   };
 
   const timeStr = currentTime.toLocaleTimeString('zh-CN', {
@@ -68,12 +62,14 @@ const LockScreen = () => {
   return (
     <div 
       className="fixed inset-0 z-50 cursor-pointer select-none overflow-hidden"
-      onClick={handleUnlock}
+      onClick={handleClick}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
     >
       {/* 背景图 + 动效 */}
       <div 
-        className={`absolute inset-0 transition-all duration-700 ${
-          unlocking ? 'scale-110 blur-sm opacity-0' : ''
+        className={`absolute inset-0 transition-all duration-700 ease-out ${
+          unlocking ? 'scale-110 opacity-0' : ''
         }`}
       >
         <img
@@ -81,111 +77,88 @@ const LockScreen = () => {
           alt="Lock Screen"
           className="w-full h-full object-cover"
           style={{
-            animation: 'lockscreen-drift 20s ease-in-out infinite',
+            animation: 'lockscreen-drift 25s ease-in-out infinite',
           }}
         />
         
-        {/* 光效叠加 */}
+        {/* 海面波光效果 */}
         <div 
           className="absolute inset-0"
           style={{
-            background: 'linear-gradient(135deg, transparent 30%, rgba(255,200,100,0.08) 50%, transparent 70%)',
-            animation: 'light-sweep 8s ease-in-out infinite',
+            background: 'linear-gradient(180deg, transparent 50%, rgba(255,150,50,0.06) 70%, rgba(255,100,0,0.08) 85%, transparent 100%)',
+            animation: 'ocean-shimmer 4s ease-in-out infinite',
           }}
         />
-        
-        {/* 顶部渐变（让文字更清晰） */}
-        <div className="absolute top-0 left-0 right-0 h-48 bg-gradient-to-b from-black/40 to-transparent" />
+
+        {/* 顶部渐变 */}
+        <div className="absolute top-0 left-0 right-0 h-52 bg-gradient-to-b from-black/30 to-transparent" />
         
         {/* 底部渐变 */}
-        <div className="absolute bottom-0 left-0 right-0 h-48 bg-gradient-to-t from-black/50 to-transparent" />
+        <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-black/40 to-transparent" />
       </div>
-
-      {/* 涟漪效果 */}
-      {ripple && (
-        <div
-          className="absolute rounded-full border-2 border-white/40 pointer-events-none"
-          style={{
-            left: ripple.x - 40,
-            top: ripple.y - 40,
-            width: 80,
-            height: 80,
-            animation: 'ripple-expand 0.6s ease-out forwards',
-          }}
-        />
-      )}
 
       {/* 时间显示 */}
       <div className={`absolute top-16 left-0 right-0 text-center transition-all duration-700 ${
         unlocking ? '-translate-y-20 opacity-0' : ''
       }`}>
-        <div className="text-white text-7xl font-thin tracking-wider drop-shadow-lg"
+        <div 
+          className="text-white text-7xl font-extralight tracking-widest drop-shadow-lg"
           style={{ fontFamily: '-apple-system, "Helvetica Neue", sans-serif' }}
         >
           {timeStr}
         </div>
-        <div className="text-white/80 text-lg mt-2 drop-shadow-md">
+        <div className="text-white/70 text-base mt-2 font-light tracking-wide drop-shadow-md">
           {dateStr}
         </div>
       </div>
 
       {/* 解锁提示 */}
-      <div className={`absolute bottom-20 left-0 right-0 text-center transition-all duration-500 ${
+      <div className={`absolute bottom-16 left-0 right-0 text-center transition-all duration-500 ${
         unlocking ? 'translate-y-10 opacity-0' : ''
       } ${showHint ? 'opacity-100' : 'opacity-0'}`}>
-        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-black/30 backdrop-blur-sm">
-          <span className="text-white/90 text-sm">
-            轻触苹果解锁 🍎
-          </span>
+        <div className="text-white/70 text-sm font-light tracking-wider"
+          style={{ animation: 'fade-pulse 3s ease-in-out infinite' }}
+        >
+          上滑或轻触解锁
         </div>
-        <div className="mt-3">
+        <div className="mt-4 flex justify-center">
           <div 
-            className="w-1 h-1 bg-white/60 rounded-full mx-auto"
-            style={{ animation: 'bounce-dot 2s ease-in-out infinite' }}
+            className="w-10 h-1 rounded-full bg-white/40"
+            style={{ animation: 'swipe-hint 2s ease-in-out infinite' }}
           />
         </div>
       </div>
 
-      {/* 解锁成功动画 */}
+      {/* 解锁成功 - 白色闪光 */}
       {unlocking && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div 
-            className="w-20 h-20 rounded-full border-2 border-white/60 flex items-center justify-center"
-            style={{ animation: 'unlock-ring 0.6s ease-out forwards' }}
-          >
-            <svg className="w-10 h-10 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M5 12l5 5L20 7" style={{ animation: 'draw-check 0.4s ease-out 0.2s forwards', strokeDasharray: 30, strokeDashoffset: 30 }} />
-            </svg>
-          </div>
-        </div>
+        <div 
+          className="absolute inset-0 bg-white"
+          style={{ animation: 'flash-in 0.6s ease-out forwards' }}
+        />
       )}
 
       <style>{`
         @keyframes lockscreen-drift {
-          0%, 100% { transform: scale(1.02) translate(0, 0); }
-          25% { transform: scale(1.04) translate(-0.5%, -0.3%); }
-          50% { transform: scale(1.03) translate(0.3%, 0.5%); }
-          75% { transform: scale(1.05) translate(0.5%, -0.2%); }
+          0%, 100% { transform: scale(1.03); }
+          33% { transform: scale(1.06) translate(-0.3%, -0.2%); }
+          66% { transform: scale(1.04) translate(0.2%, 0.3%); }
         }
-        @keyframes light-sweep {
-          0%, 100% { opacity: 0; transform: translateX(-100%); }
-          50% { opacity: 1; transform: translateX(100%); }
+        @keyframes ocean-shimmer {
+          0%, 100% { opacity: 0.3; }
+          50% { opacity: 0.8; }
         }
-        @keyframes ripple-expand {
-          0% { transform: scale(0.5); opacity: 1; }
-          100% { transform: scale(3); opacity: 0; }
+        @keyframes fade-pulse {
+          0%, 100% { opacity: 0.5; }
+          50% { opacity: 1; }
         }
-        @keyframes bounce-dot {
-          0%, 100% { transform: translateY(0); opacity: 0.6; }
-          50% { transform: translateY(8px); opacity: 1; }
+        @keyframes swipe-hint {
+          0%, 100% { transform: translateY(0); opacity: 0.4; }
+          50% { transform: translateY(-6px); opacity: 0.8; }
         }
-        @keyframes unlock-ring {
-          0% { transform: scale(0.5); opacity: 0; }
-          50% { transform: scale(1.2); opacity: 1; }
-          100% { transform: scale(1); opacity: 1; }
-        }
-        @keyframes draw-check {
-          to { stroke-dashoffset: 0; }
+        @keyframes flash-in {
+          0% { opacity: 0; }
+          40% { opacity: 1; }
+          100% { opacity: 1; }
         }
       `}</style>
     </div>
