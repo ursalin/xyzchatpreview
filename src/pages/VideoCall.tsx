@@ -4,7 +4,7 @@ import Live2DPanel, { Live2DPanelRef } from '@/components/live2d/Live2DPanel';
 import { Button } from '@/components/ui/button';
 import { 
   ArrowLeft, Mic, MicOff, Video, VideoOff, PhoneOff, 
-  MessageSquare, Volume2, VolumeX, RotateCcw, Trash2, CheckSquare, X
+  MessageSquare, Volume2, VolumeX, RotateCcw, Trash2, CheckSquare, X, Pencil, Check
 } from 'lucide-react';
 import { useVideoCall } from '@/hooks/useVideoCall';
 import { useSettings } from '@/hooks/useSettings';
@@ -23,6 +23,8 @@ const VideoCall = () => {
   const [isGeneratingLipsync, setIsGeneratingLipsync] = useState(false);
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedMsgIds, setSelectedMsgIds] = useState<Set<string>>(new Set());
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState('');
   
   const live2dPanelRef = useRef<Live2DPanelRef>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -58,6 +60,7 @@ const VideoCall = () => {
     sendMessage,
     clearMessages,
     deleteMessages,
+    editMessage,
     stopPlaying,
   } = useVideoCall({
     settings,
@@ -369,17 +372,88 @@ const VideoCall = () => {
                     )}
                   </div>
                 )}
-                <div
-                  className={cn(
-                    "px-4 py-2 rounded-2xl text-sm max-w-[80%]",
-                    msg.role === 'user'
-                      ? "bg-blue-500 text-white"
-                      : "bg-white/90 text-black",
-                    isSelectMode && "cursor-pointer",
-                    isSelectMode && selectedMsgIds.has(msg.id) && "ring-2 ring-blue-400"
+                <div className="flex flex-col max-w-[80%]">
+                  {editingMsgId === msg.id ? (
+                    /* 编辑模式 */
+                    <div className={cn(
+                      "flex items-end gap-1",
+                      msg.role === 'user' ? "flex-row-reverse" : "flex-row"
+                    )}>
+                      <textarea
+                        autoFocus
+                        value={editingText}
+                        onChange={(e) => setEditingText(e.target.value)}
+                        className="px-3 py-2 rounded-2xl text-sm bg-white text-black border-2 border-blue-400 resize-none min-w-[120px] focus:outline-none"
+                        rows={Math.min(4, editingText.split('\n').length + 1)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            if (editingText.trim()) {
+                              editMessage(msg.id, editingText.trim());
+                            }
+                            setEditingMsgId(null);
+                          } else if (e.key === 'Escape') {
+                            setEditingMsgId(null);
+                          }
+                        }}
+                      />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-7 p-0 bg-green-500/80 text-white rounded-full hover:bg-green-600/80"
+                        onClick={() => {
+                          if (editingText.trim()) {
+                            editMessage(msg.id, editingText.trim());
+                          }
+                          setEditingMsgId(null);
+                        }}
+                      >
+                        <Check className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-7 p-0 bg-white/20 text-white rounded-full hover:bg-white/30"
+                        onClick={() => setEditingMsgId(null)}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ) : (
+                    /* 普通显示模式 */
+                    <div className="group relative">
+                      <div
+                        className={cn(
+                          "px-4 py-2 rounded-2xl text-sm",
+                          msg.role === 'user'
+                            ? "bg-blue-500 text-white"
+                            : "bg-white/90 text-black",
+                          isSelectMode && "cursor-pointer",
+                          isSelectMode && selectedMsgIds.has(msg.id) && "ring-2 ring-blue-400"
+                        )}
+                      >
+                        {msg.content}
+                      </div>
+                      {/* 编辑按钮 - hover 时显示 */}
+                      {!isSelectMode && (
+                        <button
+                          className={cn(
+                            "absolute top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity",
+                            "w-6 h-6 rounded-full bg-black/50 flex items-center justify-center",
+                            "active:opacity-100 md:hover:opacity-100",
+                            msg.role === 'user' ? "-left-8" : "-right-8"
+                          )}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingMsgId(msg.id);
+                            setEditingText(msg.content);
+                          }}
+                        >
+                          <Pencil className="h-3 w-3 text-white" />
+                        </button>
+                      )}
+                    </div>
                   )}
-                >
-                  {msg.content}
                 </div>
               </div>
             ))}

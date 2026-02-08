@@ -744,6 +744,13 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     setMessages(prev => prev.filter(m => !messageIds.includes(m.id)));
   }, []);
 
+  // 编辑指定消息
+  const editMessage = useCallback((messageId: string, newContent: string) => {
+    setMessages(prev => prev.map(m => 
+      m.id === messageId ? { ...m, content: newContent } : m
+    ));
+  }, []);
+
   // 清理
   useEffect(() => {
     return () => {
@@ -771,6 +778,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     sendMessage,
     clearMessages,
     deleteMessages,
+    editMessage,
     clearMemory,
     updateMemorySummary,
     speak,
