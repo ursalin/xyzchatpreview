@@ -219,21 +219,6 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     onSpeakingChange?.(isPlaying);
   }, [isPlaying, onSpeakingChange]);
 
-  // TTS 播放前暂停 STT，播完后自动恢复
-  const wasPlayingRef = useRef(false);
-  useEffect(() => {
-    if (isPlaying && !wasPlayingRef.current) {
-      // TTS 开始播放 → 暂停 STT
-      console.log('[VideoCall] TTS started, pausing STT');
-      stopListening();
-    } else if (!isPlaying && wasPlayingRef.current) {
-      // TTS 播完 → 恢复 STT
-      console.log('[VideoCall] TTS ended, resuming STT');
-      setTimeout(() => startListening(), 300);
-    }
-    wasPlayingRef.current = isPlaying;
-  }, [isPlaying, stopListening, startListening]);
-
   // 启动摄像头
   const startCamera = useCallback(async (videoElement: HTMLVideoElement) => {
     try {
@@ -517,10 +502,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
           
           // 将音频数据传递给预设动画系统，由它来处理同步播放
           if (onPresetAnimationTrigger) {
-            stopListening();
             await onPresetAnimationTrigger(data.audioContent);
-            // 动画+音频播完，恢复 STT
-            setTimeout(() => startListening(), 300);
           } else {
             // 后备：如果没有预设动画处理器，直接播放音频
             const audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
@@ -723,11 +705,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
 
       // 自动播放TTS
       if (assistantContent && settings.voiceConfig.enabled) {
-        stopListening();
         await speak(assistantContent);
-        // TTS 播完，恢复 STT
-        console.log('[VideoCall] speak() done, resuming STT in 500ms');
-        setTimeout(() => startListening(), 500);
       }
 
       return assistantContent;
@@ -744,7 +722,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     } finally {
       setIsLoading(false);
     }
-  }, [messages, systemPrompt, captureFrame, settings, speak, checkAndSummarize, buildContextMessages, stopListening, startListening]);
+  }, [messages, systemPrompt, captureFrame, settings, speak, checkAndSummarize, buildContextMessages]);
 
   // 同步 sendMessage 到 ref，让 STT 回调始终调用最新版本
   useEffect(() => {
