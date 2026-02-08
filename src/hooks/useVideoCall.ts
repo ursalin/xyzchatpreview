@@ -3,6 +3,7 @@ import { Message, AppSettings } from '@/types/chat';
 import { supabase } from '@/integrations/supabase/client';
 import { removeParenthesesContent } from '@/lib/textUtils';
 import { useWebSpeechSTT } from './useWebSpeechSTT';
+import { useXunfeiSTT } from './useXunfeiSTT';
 import { useMemoryManager } from './useMemoryManager';
 
 // 角色图片 URL（需要是公开可访问的 URL）
@@ -144,39 +145,57 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     updateMemorySummary,
   } = useMemoryManager();
 
-  // 使用 Web Speech API 进行语音识别
-  const {
-    isListening: isRecording,
-    interimTranscript: webSpeechInterim,
-    startListening,
-    stopListening,
-  } = useWebSpeechSTT({
-    language: 'zh-CN',
-    onResult: (transcript, isFinal) => {
-      if (isFinal) {
-        // 最终结果，发送消息
-        if (transcript.trim()) {
-          sendMessage(transcript.trim(), true);
-        }
-        setInterimTranscript('');
-        pendingTranscriptRef.current = '';
-      } else {
-        // 临时结果，仅显示
-        setInterimTranscript(transcript);
-        pendingTranscriptRef.current = transcript;
+  // STT 回调
+  const handleSTTResult = useCallback((transcript: string, isFinal: boolean) => {
+    if (isFinal) {
+      // 最终结果，发送消息
+      if (transcript.trim()) {
+        sendMessage(transcript.trim(), true);
       }
-    },
-    onError: (error) => {
-      console.error('[STT Error]', error);
       setInterimTranscript('');
       pendingTranscriptRef.current = '';
-    },
+    } else {
+      // 临时结果，仅显示
+      setInterimTranscript(transcript);
+      pendingTranscriptRef.current = transcript;
+    }
+  }, []);
+
+  const handleSTTError = useCallback((error: string) => {
+    console.error('[STT Error]', error);
+    setInterimTranscript('');
+    pendingTranscriptRef.current = '';
+  }, []);
+
+  // 尝试使用讯飞语音识别
+  const xunfeiSTT = useXunfeiSTT({
+    language: 'zh_cn',
+    onResult: handleSTTResult,
+    onError: handleSTTError,
   });
 
-  // 同步 Web Speech 的临时识别结果
+  // 备用：Web Speech API
+  const webSpeechSTT = useWebSpeechSTT({
+    language: 'zh-CN',
+    onResult: handleSTTResult,
+    onError: handleSTTError,
+  });
+
+  // 优先使用讯飞，如果不可用则使用 Web Speech API
+  const sttEngine = xunfeiSTT.isSupported ? xunfeiSTT : webSpeechSTT;
+  const {
+    isListening: isRecording,
+    interimTranscript: sttInterim,
+    startListening,
+    stopListening,
+  } = sttEngine;
+
+  console.log('[STT] Using engine:', xunfeiSTT.isSupported ? 'Xunfei' : 'Web Speech API');
+
+  // 同步 STT 的临时识别结果
   useEffect(() => {
-    setInterimTranscript(webSpeechInterim);
-  }, [webSpeechInterim]);
+    setInterimTranscript(sttInterim);
+  }, [sttInterim]);
 
   const isProcessingVoice = false; // Web Speech API 不需要处理延迟
 
@@ -255,15 +274,16 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     return canvas.toDataURL('image/jpeg', 0.8);
   }, []);
 
-  // 开始录音 - 使用 Web Speech API
+  // 开始录音
   const startRecording = useCallback(async () => {
-    const success = startListening();
-    if (!success) {
+    try {
+      await startListening();
+    } catch (e) {
       throw new Error('Failed to start speech recognition');
     }
   }, [startListening]);
 
-  // 停止录音 - 使用 Web Speech API
+  // 停止录音
   const stopRecording = useCallback(async (): Promise<string> => {
     stopListening();
     // Web Speech API 会通过 onResult 回调返回结果

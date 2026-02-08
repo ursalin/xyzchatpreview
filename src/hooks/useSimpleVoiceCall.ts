@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Message, AppSettings, defaultVoiceConfig } from '@/types/chat';
 import { useWebSpeechSTT } from './useWebSpeechSTT';
+import { useXunfeiSTT } from './useXunfeiSTT';
 import { removeParenthesesContent } from '@/lib/textUtils';
 
 interface UseSimpleVoiceCallOptions {
@@ -309,36 +310,54 @@ export function useSimpleVoiceCall({
     sendMessageToAIRef.current = sendMessageToAI;
   }, [sendMessageToAI]);
 
-  // 使用 Web Speech API 进行语音识别
+  // STT 回调函数（Web Speech 和讯飞共用）
+  const handleSTTResult = useCallback((transcript: string, isFinal: boolean) => {
+    // TTS 播放中忽略所有识别结果，防止回声
+    if (isTTSPlayingRef.current) {
+      console.log('[STT] Ignoring result during TTS playback:', transcript.substring(0, 30));
+      return;
+    }
+    if (isFinal) {
+      if (transcript.trim() && isConnectedRef.current) {
+        console.log('[Voice] Sending final transcript:', transcript.trim());
+        sendMessageToAIRef.current(transcript.trim());
+      }
+      setInterimTranscript('');
+    } else {
+      setInterimTranscript(transcript);
+    }
+  }, []);
+
+  const handleSTTError = useCallback((error: string) => {
+    console.error('[STT Error]', error);
+    setInterimTranscript('');
+  }, []);
+
+  // 尝试使用讯飞语音识别
+  const xunfeiSTT = useXunfeiSTT({
+    language: 'zh_cn',
+    onResult: handleSTTResult,
+    onError: handleSTTError,
+  });
+
+  // 备用：Web Speech API
+  const webSpeechSTT = useWebSpeechSTT({
+    language: 'zh-CN',
+    onResult: handleSTTResult,
+    onError: handleSTTError,
+  });
+
+  // 优先使用讯飞，如果不可用则使用 Web Speech API
+  const sttEngine = xunfeiSTT.isSupported ? xunfeiSTT : webSpeechSTT;
   const {
     isListening: isRecording,
     isSupported: isSpeechSupported,
-    interimTranscript: webSpeechInterim,
+    interimTranscript: sttInterim,
     startListening,
     stopListening,
-  } = useWebSpeechSTT({
-    language: 'zh-CN',
-    onResult: useCallback((transcript: string, isFinal: boolean) => {
-      // TTS 播放中忽略所有识别结果，防止回声
-      if (isTTSPlayingRef.current) {
-        console.log('[STT] Ignoring result during TTS playback:', transcript.substring(0, 30));
-        return;
-      }
-      if (isFinal) {
-        if (transcript.trim() && isConnectedRef.current) {
-          console.log('[Voice] Sending final transcript:', transcript.trim());
-          sendMessageToAIRef.current(transcript.trim());
-        }
-        setInterimTranscript('');
-      } else {
-        setInterimTranscript(transcript);
-      }
-    }, []),
-    onError: useCallback((error: string) => {
-      console.error('[STT Error]', error);
-      setInterimTranscript('');
-    }, []),
-  });
+  } = sttEngine;
+
+  console.log('[STT] Using engine:', xunfeiSTT.isSupported ? 'Xunfei' : 'Web Speech API');
 
   // 绑定 STT 暂停/恢复到 ref，供 speak() 使用
   useEffect(() => {
@@ -356,8 +375,8 @@ export function useSimpleVoiceCall({
 
   // 同步临时识别结果
   useEffect(() => {
-    setInterimTranscript(webSpeechInterim);
-  }, [webSpeechInterim]);
+    setInterimTranscript(sttInterim);
+  }, [sttInterim]);
 
   // 通知父组件说话状态
   useEffect(() => {
