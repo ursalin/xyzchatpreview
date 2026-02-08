@@ -30,6 +30,8 @@ export function useXunfeiSTT({
   // 回调 ref，避免闭包过期
   const onResultRef = useRef(onResult);
   const onErrorRef = useRef(onError);
+  // WebSocket 连接时间戳，用于提前重连
+  const wsConnectTimeRef = useRef<number>(0);
 
   useEffect(() => { onResultRef.current = onResult; }, [onResult]);
   useEffect(() => { onErrorRef.current = onError; }, [onError]);
@@ -89,6 +91,7 @@ export function useXunfeiSTT({
         console.log('[Xunfei STT] WebSocket connected');
         connectingRef.current = false;
         setIsListening(true);
+        wsConnectTimeRef.current = Date.now();
 
         // 发送配置参数（第一帧）
         const params = {
@@ -174,14 +177,14 @@ export function useXunfeiSTT({
         connectingRef.current = false;
         wsRef.current = null;
         
-        // 如果仍然处于活跃状态，自动重连
+        // 如果仍然处于活跃状态，立即重连（缩短延迟）
         if (activeRef.current) {
-          console.log('[Xunfei STT] Auto-reconnecting in 500ms...');
+          console.log('[Xunfei STT] Auto-reconnecting in 100ms...');
           setTimeout(() => {
             if (activeRef.current) {
               connectWebSocket();
             }
-          }, 500);
+          }, 100);
         } else {
           setIsListening(false);
         }
@@ -208,6 +211,14 @@ export function useXunfeiSTT({
     processor.onaudioprocess = (e) => {
       const ws = wsRef.current;
       if (!activeRef.current || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+      // 检查 WebSocket 连接时长，超过 55 秒主动重连（讯飞限制 60 秒）
+      const connectionAge = Date.now() - wsConnectTimeRef.current;
+      if (connectionAge > 55000 && !connectingRef.current) {
+        console.log('[Xunfei STT] Connection age > 55s, proactive reconnect');
+        ws.close();
+        return;
+      }
 
       const inputData = e.inputBuffer.getChannelData(0);
       const pcmData = new Int16Array(inputData.length);
