@@ -4,7 +4,7 @@ import Live2DPanel, { Live2DPanelRef } from '@/components/live2d/Live2DPanel';
 import { Button } from '@/components/ui/button';
 import { 
   ArrowLeft, Mic, MicOff, Video, VideoOff, PhoneOff, 
-  MessageSquare, Volume2, VolumeX, RotateCcw
+  MessageSquare, Volume2, VolumeX, RotateCcw, Trash2, CheckSquare, X
 } from 'lucide-react';
 import { useVideoCall } from '@/hooks/useVideoCall';
 import { useSettings } from '@/hooks/useSettings';
@@ -21,6 +21,8 @@ const VideoCall = () => {
   const [callDuration, setCallDuration] = useState(0);
   const [lipsyncVideoUrl, setLipsyncVideoUrl] = useState<string | null>(null);
   const [isGeneratingLipsync, setIsGeneratingLipsync] = useState(false);
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [selectedMsgIds, setSelectedMsgIds] = useState<Set<string>>(new Set());
   
   const live2dPanelRef = useRef<Live2DPanelRef>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -55,6 +57,7 @@ const VideoCall = () => {
     stopRecording,
     sendMessage,
     clearMessages,
+    deleteMessages,
     stopPlaying,
   } = useVideoCall({
     settings,
@@ -273,18 +276,111 @@ const VideoCall = () => {
       {/* 消息气泡（可选显示） */}
       {showMessages && messages.length > 0 && (
         <div className="absolute bottom-36 left-4 right-4 z-20 max-h-[40vh] overflow-y-auto">
+          {/* 消息管理工具栏 */}
+          <div className="flex justify-end gap-2 mb-2">
+            {isSelectMode ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-xs bg-red-500/80 text-white hover:bg-red-600/80"
+                  disabled={selectedMsgIds.size === 0}
+                  onClick={() => {
+                    deleteMessages(Array.from(selectedMsgIds));
+                    setSelectedMsgIds(new Set());
+                    setIsSelectMode(false);
+                  }}
+                >
+                  <Trash2 className="h-3 w-3 mr-1" />
+                  删除({selectedMsgIds.size})
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-xs bg-white/20 text-white hover:bg-white/30"
+                  onClick={() => {
+                    // 全选/取消全选
+                    if (selectedMsgIds.size === messages.slice(-20).length) {
+                      setSelectedMsgIds(new Set());
+                    } else {
+                      setSelectedMsgIds(new Set(messages.slice(-20).map(m => m.id)));
+                    }
+                  }}
+                >
+                  {selectedMsgIds.size === messages.slice(-20).length ? '取消全选' : '全选'}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-xs bg-white/20 text-white hover:bg-white/30"
+                  onClick={() => {
+                    setIsSelectMode(false);
+                    setSelectedMsgIds(new Set());
+                  }}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs bg-white/20 text-white hover:bg-white/30"
+                onClick={() => setIsSelectMode(true)}
+              >
+                <CheckSquare className="h-3 w-3 mr-1" />
+                选择
+              </Button>
+            )}
+          </div>
           <div className="space-y-2">
             {messages.slice(-20).map((msg) => (
               <div
                 key={msg.id}
                 className={cn(
-                  "px-4 py-2 rounded-2xl text-sm max-w-[80%]",
-                  msg.role === 'user'
-                    ? "ml-auto bg-blue-500 text-white"
-                    : "mr-auto bg-white/90 text-black"
+                  "flex items-start gap-2",
+                  msg.role === 'user' ? "flex-row-reverse" : "flex-row"
                 )}
+                onClick={() => {
+                  if (isSelectMode) {
+                    setSelectedMsgIds(prev => {
+                      const next = new Set(prev);
+                      if (next.has(msg.id)) {
+                        next.delete(msg.id);
+                      } else {
+                        next.add(msg.id);
+                      }
+                      return next;
+                    });
+                  }
+                }}
               >
-                {msg.content}
+                {isSelectMode && (
+                  <div className={cn(
+                    "mt-2 w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center",
+                    selectedMsgIds.has(msg.id) 
+                      ? "bg-blue-500 border-blue-500" 
+                      : "border-white/50"
+                  )}>
+                    {selectedMsgIds.has(msg.id) && (
+                      <svg className="w-3 h-3 text-white" viewBox="0 0 12 12">
+                        <path d="M3 6l2 2 4-4" stroke="currentColor" strokeWidth="2" fill="none"/>
+                      </svg>
+                    )}
+                  </div>
+                )}
+                <div
+                  className={cn(
+                    "px-4 py-2 rounded-2xl text-sm max-w-[80%]",
+                    msg.role === 'user'
+                      ? "bg-blue-500 text-white"
+                      : "bg-white/90 text-black",
+                    isSelectMode && "cursor-pointer",
+                    isSelectMode && selectedMsgIds.has(msg.id) && "ring-2 ring-blue-400"
+                  )}
+                >
+                  {msg.content}
+                </div>
               </div>
             ))}
             <div ref={messagesEndRef} />
