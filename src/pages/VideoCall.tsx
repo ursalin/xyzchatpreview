@@ -137,7 +137,6 @@ const VideoCall = () => {
     stopRecording();
     stopCamera();
     stopPlaying();
-    clearMessages();
     setIsInCall(false);
     setCallDuration(0);
     if (callTimerRef.current) {
