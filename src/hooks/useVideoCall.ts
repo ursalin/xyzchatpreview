@@ -220,13 +220,18 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
   }, [isPlaying, onSpeakingChange]);
 
   // 启动摄像头
-  const startCamera = useCallback(async (videoElement: HTMLVideoElement) => {
+  const startCamera = useCallback(async (videoElement: HTMLVideoElement, facing: 'user' | 'environment' = 'user') => {
     try {
+      // 先停掉旧的流
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: { ideal: 640 },
           height: { ideal: 480 },
-          facingMode: 'user',
+          facingMode: facing,
         },
         audio: false,
       });

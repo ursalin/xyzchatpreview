@@ -4,7 +4,7 @@ import Live2DPanel, { Live2DPanelRef } from '@/components/live2d/Live2DPanel';
 import { Button } from '@/components/ui/button';
 import { 
   ArrowLeft, Mic, MicOff, Video, VideoOff, PhoneOff, 
-  MessageSquare, Volume2, VolumeX, RotateCcw, Trash2, CheckSquare, X, Pencil, Check
+  MessageSquare, Volume2, VolumeX, RotateCcw, Trash2, CheckSquare, X, Pencil, Check, SwitchCamera
 } from 'lucide-react';
 import { useVideoCall } from '@/hooks/useVideoCall';
 import { useSettings } from '@/hooks/useSettings';
@@ -17,6 +17,7 @@ const VideoCall = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [showMessages, setShowMessages] = useState(true);
   const [callDuration, setCallDuration] = useState(0);
   const [lipsyncVideoUrl, setLipsyncVideoUrl] = useState<string | null>(null);
@@ -168,16 +169,25 @@ const VideoCall = () => {
     }
   };
 
-  // 切换摄像头
+  // 切换摄像头开关
   const handleToggleCamera = async () => {
     if (isCameraOn) {
       stopCamera();
       setIsCameraOn(false);
     } else {
       if (videoRef.current) {
-        await startCamera(videoRef.current);
+        await startCamera(videoRef.current, facingMode);
         setIsCameraOn(true);
       }
+    }
+  };
+
+  // 切换前后摄像头
+  const handleSwitchCamera = async () => {
+    const newFacing = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(newFacing);
+    if (isCameraOn && videoRef.current) {
+      await startCamera(videoRef.current, newFacing);
     }
   };
 
@@ -506,6 +516,18 @@ const VideoCall = () => {
             >
               {isCameraOn ? <Video className="h-6 w-6" /> : <VideoOff className="h-6 w-6" />}
             </Button>
+
+            {/* 切换前后摄像头 */}
+            {isCameraOn && (
+              <Button
+                onClick={handleSwitchCamera}
+                size="icon"
+                variant="ghost"
+                className="rounded-full h-14 w-14 bg-white/20 text-white hover:bg-white/30"
+              >
+                <SwitchCamera className="h-6 w-6" />
+              </Button>
+            )}
 
             {/* 挂断 */}
             <Button
