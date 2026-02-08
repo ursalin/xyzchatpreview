@@ -12,13 +12,10 @@ interface VideoAvatarProps {
 }
 
 const VideoAvatar = forwardRef<VideoAvatarRef, VideoAvatarProps>(({ 
-  isSpeaking = false,
   onImageLoaded 
 }, ref) => {
 
-  const playPresetAnimation = useCallback(() => {
-    // 不需要做什么，动画由 CSS 控制
-  }, []);
+  const playPresetAnimation = useCallback(() => {}, []);
 
   useImperativeHandle(ref, () => ({
     playPresetAnimation,
@@ -31,22 +28,7 @@ const VideoAvatar = forwardRef<VideoAvatarRef, VideoAvatarProps>(({
         alt="Character"
         onLoad={() => onImageLoaded?.()}
         className="w-full h-full object-contain"
-        style={{
-          animation: isSpeaking 
-            ? 'speaking-pulse 2s ease-in-out infinite' 
-            : 'idle-breathe 4s ease-in-out infinite',
-        }}
       />
-      <style>{`
-        @keyframes idle-breathe {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.008); }
-        }
-        @keyframes speaking-pulse {
-          0%, 100% { transform: scale(1); filter: brightness(1); }
-          50% { transform: scale(1.012); filter: brightness(1.03); }
-        }
-      `}</style>
     </div>
   );
 });
