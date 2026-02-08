@@ -17,7 +17,7 @@ const VideoCall = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
-  const [showMessages, setShowMessages] = useState(false);
+  const [showMessages, setShowMessages] = useState(true);
   const [callDuration, setCallDuration] = useState(0);
   const [lipsyncVideoUrl, setLipsyncVideoUrl] = useState<string | null>(null);
   const [isGeneratingLipsync, setIsGeneratingLipsync] = useState(false);
@@ -28,6 +28,7 @@ const VideoCall = () => {
   const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // 获取当前时间信息
   const now = new Date();
@@ -97,6 +98,13 @@ const VideoCall = () => {
       }
     };
   }, [messages, isRecording, isPlaying, isInCall, resetSilenceTimer]);
+
+  // 消息变化时自动滚动到底部
+  useEffect(() => {
+    if (showMessages && messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, showMessages]);
 
   // 格式化通话时长
   const formatDuration = (seconds: number) => {
@@ -267,7 +275,7 @@ const VideoCall = () => {
       {showMessages && messages.length > 0 && (
         <div className="absolute bottom-36 left-4 right-4 z-20 max-h-[40vh] overflow-y-auto">
           <div className="space-y-2">
-            {messages.slice(-5).map((msg) => (
+            {messages.slice(-20).map((msg) => (
               <div
                 key={msg.id}
                 className={cn(
@@ -280,6 +288,7 @@ const VideoCall = () => {
                 {msg.content}
               </div>
             ))}
+            <div ref={messagesEndRef} />
           </div>
         </div>
       )}
