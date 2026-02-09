@@ -53,7 +53,14 @@ const VideoCall = () => {
 背景：${settings.character.background}
 说话风格：${settings.character.speakingStyle}
 当前时间：${dateString} ${timeString}（${timeOfDay}）
-你现在正在和用户进行视频通话。请像真正的视频通话一样自然交流，回复简洁有趣，适合口语交流。`;
+你现在正在和用户进行视频通话。请像真正的视频通话一样自然交流。
+
+重要规则：
+- 每次回复控制在1-3句话，不超过50个字
+- 像真人视频聊天一样简短自然，不要长篇大论
+- 语气口语化，可以用语气词（嗯、啊、哈哈、诶）
+- 不要一次说太多话题，一次只聊一个点
+- 如果用户说的少，你也说少一点，保持节奏对等`;
 
   const {
     messages,
