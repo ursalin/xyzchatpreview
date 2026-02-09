@@ -88,7 +88,7 @@ export function useSimpleVoiceCall({
             stream: false,
             voice_setting: {
               voice_id: voice,
-              speed: 1.0,
+              speed: 1.15,
               vol: 1.0,
               pitch: 0,
             },
