@@ -39,14 +39,15 @@ export function ChatMessage({
   };
 
   // 长按开始
+  // 长按开始
   const handlePressStart = () => {
     longPressTimer.current = setTimeout(() => {
       setShowMenu(true);
     }, 500);
   };
 
-  // 长按结束
-  const handlePressEnd = () => {
+  // 长按结束 / 取消
+  const handlePressCancel = () => {
     if (longPressTimer.current) {
       clearTimeout(longPressTimer.current);
       longPressTimer.current = null;
@@ -63,10 +64,11 @@ export function ChatMessage({
             : 'mr-auto bg-muted'
         )}
         onTouchStart={handlePressStart}
-        onTouchEnd={handlePressEnd}
+        onTouchEnd={handlePressCancel}
+        onTouchMove={handlePressCancel}
         onMouseDown={handlePressStart}
-        onMouseUp={handlePressEnd}
-        onMouseLeave={handlePressEnd}
+        onMouseUp={handlePressCancel}
+        onMouseLeave={handlePressCancel}
         onContextMenu={(e) => {
           e.preventDefault();
           setShowMenu(true);
