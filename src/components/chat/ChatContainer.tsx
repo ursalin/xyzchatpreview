@@ -7,9 +7,10 @@ import { ChatInput } from './ChatInput';
 import { SettingsPanel } from './SettingsPanel';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Trash2, MessageCircle, Brain } from 'lucide-react';
+import { Trash2, MessageCircle, Brain, Star, ArrowLeft, X } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import MemoryPanel from '@/components/memory/MemoryPanel';
+import { cn } from '@/lib/utils';
 
 interface ChatContainerProps {
   onSpeakingChange?: (isSpeaking: boolean) => void;
@@ -27,6 +28,8 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
     sendMessage, 
     clearMessages,
     deleteMessages,
+    toggleStarMessage,
+    starredMessages,
     clearMemory,
     updateMemorySummary,
   } = useChat(settings, systemPrompt);
@@ -41,13 +44,13 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
   const scrollRef = useRef<HTMLDivElement>(null);
   const [currentPlayingId, setCurrentPlayingId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('chat');
+  const [showStarred, setShowStarred] = useState(false);
+  const [highlightMsgId, setHighlightMsgId] = useState<string | null>(null);
 
-  // Notify parent about speaking state
   useEffect(() => {
     onSpeakingChange?.(isPlaying);
   }, [isPlaying, onSpeakingChange]);
 
-  // Notify parent about mood based on loading state
   useEffect(() => {
     if (isLoading) {
       onMoodChange?.('thinking');
@@ -69,11 +72,18 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
     if (settings.voiceConfig.enabled && messages.length > 0) {
       const lastMessage = messages[messages.length - 1];
       if (lastMessage.role === 'assistant' && !isLoading && lastMessage.content) {
-        // Auto-speak the latest response
         handleSpeak(lastMessage.id, lastMessage.content);
       }
     }
   }, [messages, isLoading, settings.voiceConfig.enabled]);
+
+  // 高亮消失
+  useEffect(() => {
+    if (highlightMsgId) {
+      const timer = setTimeout(() => setHighlightMsgId(null), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightMsgId]);
 
   const handleSpeak = async (messageId: string, text: string) => {
     if (currentPlayingId === messageId && isPlaying) {
@@ -89,6 +99,20 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
     setCurrentPlayingId(null);
   };
 
+  // 跳转到收藏消息原位置
+  const handleJumpToMessage = (messageId: string) => {
+    setShowStarred(false);
+    setActiveTab('chat');
+    setHighlightMsgId(messageId);
+    // 滚动到目标消息
+    setTimeout(() => {
+      const el = document.getElementById(`msg-${messageId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+  };
+
   return (
     <div className="flex flex-col h-full bg-gradient-to-b from-background to-muted/20">
       {/* Header */}
@@ -98,6 +122,20 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
           <h1 className="font-semibold">{settings.title}</h1>
         </div>
         <div className="flex items-center gap-2">
+          {/* 收藏入口 */}
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={() => setShowStarred(!showStarred)}
+            className="relative"
+          >
+            <Star className={cn("w-4 h-4", showStarred && "text-yellow-500 fill-yellow-500")} />
+            {starredMessages.length > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-yellow-500 text-white text-[10px] rounded-full flex items-center justify-center">
+                {starredMessages.length}
+              </span>
+            )}
+          </Button>
           <SettingsPanel settings={settings} onSettingsChange={updateSettings} />
           {messages.length > 0 && activeTab === 'chat' && (
             <Button variant="ghost" size="icon" onClick={clearMessages}>
@@ -106,6 +144,68 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
           )}
         </div>
       </div>
+
+      {/* 收藏列表面板 */}
+      {showStarred && (
+        <div className="absolute inset-0 z-30 bg-background flex flex-col">
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+            <Button variant="ghost" size="icon" onClick={() => setShowStarred(false)}>
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
+            <Star className="w-5 h-5 text-yellow-500 fill-yellow-500" />
+            <h2 className="font-semibold">收藏消息</h2>
+            <span className="text-sm text-muted-foreground">({starredMessages.length})</span>
+          </div>
+          <ScrollArea className="flex-1 p-4">
+            {starredMessages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+                <Star className="w-12 h-12 mb-4 text-muted-foreground/30" />
+                <p>还没有收藏的消息</p>
+                <p className="text-sm mt-1">长按消息可以收藏哦</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {starredMessages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className="p-3 rounded-xl border border-border bg-card hover:bg-muted/50 cursor-pointer transition-colors"
+                    onClick={() => handleJumpToMessage(msg.id)}
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {msg.role === 'user' ? '你' : settings.character.name}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {msg.timestamp.toLocaleString('zh-CN', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 ml-auto"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleStarMessage(msg.id);
+                        }}
+                      >
+                        <X className="w-3 h-3" />
+                      </Button>
+                    </div>
+                    {msg.imageUrl && (
+                      <img src={msg.imageUrl} alt="" className="h-16 rounded mb-1 object-cover" />
+                    )}
+                    <p className="text-sm line-clamp-3">{msg.content}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </div>
+      )}
 
       {/* Content with Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
@@ -144,15 +244,24 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
             ) : (
               <div className="space-y-4">
                 {messages.map((message) => (
-                  <ChatMessage 
-                    key={message.id} 
-                    message={message} 
-                    characterName={settings.character.name}
-                    voiceConfig={settings.voiceConfig}
-                    onSpeak={(text) => handleSpeak(message.id, text)}
-                    isPlaying={currentPlayingId === message.id && isPlaying}
-                    isProcessing={currentPlayingId === message.id && isVoiceProcessing}
-                  />
+                  <div 
+                    key={message.id}
+                    id={`msg-${message.id}`}
+                    className={cn(
+                      "transition-all duration-500",
+                      highlightMsgId === message.id && "ring-2 ring-yellow-500 rounded-2xl"
+                    )}
+                  >
+                    <ChatMessage 
+                      message={message} 
+                      characterName={settings.character.name}
+                      voiceConfig={settings.voiceConfig}
+                      onSpeak={(text) => handleSpeak(message.id, text)}
+                      isPlaying={currentPlayingId === message.id && isPlaying}
+                      isProcessing={currentPlayingId === message.id && isVoiceProcessing}
+                      onToggleStar={toggleStarMessage}
+                    />
+                  </div>
                 ))}
                 {isLoading && messages[messages.length - 1]?.role === 'user' && (
                   <div className="flex gap-3 p-4 rounded-2xl max-w-[85%] mr-auto bg-muted animate-pulse">

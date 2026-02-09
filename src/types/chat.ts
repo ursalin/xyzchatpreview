@@ -4,6 +4,7 @@ export interface Message {
   content: string;
   timestamp: Date;
   imageUrl?: string; // base64 data URL
+  starred?: boolean; // 收藏标记
 }
 
 export interface Personality {

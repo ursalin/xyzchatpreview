@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Message, AppSettings } from '@/types/chat';
 import { useMemoryManager } from './useMemoryManager';
 
@@ -252,6 +252,19 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
     setMessages(prev => prev.filter(m => !messageIds.includes(m.id)));
   }, []);
 
+  // 切换收藏状态
+  const toggleStarMessage = useCallback((messageId: string) => {
+    setMessages(prev => prev.map(m => 
+      m.id === messageId ? { ...m, starred: !m.starred } : m
+    ));
+  }, []);
+
+  // 获取收藏的消息
+  const starredMessages = useMemo(() => 
+    messages.filter(m => m.starred), 
+    [messages]
+  );
+
   return {
     messages,
     isLoading,
@@ -260,6 +273,8 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
     sendMessage,
     clearMessages,
     deleteMessages,
+    toggleStarMessage,
+    starredMessages,
     clearMemory,
     updateMemorySummary,
   };
