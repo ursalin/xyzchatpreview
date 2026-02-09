@@ -117,7 +117,12 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
 
       if (apiConfig.useCustomApi && apiConfig.apiEndpoint && apiConfig.apiKey) {
         // Use custom API directly from frontend
-        apiUrl = apiConfig.apiEndpoint;
+        // Auto-append /v1/chat/completions if not present (like SillyTavern)
+        let endpoint = apiConfig.apiEndpoint.trim();
+        if (!endpoint.endsWith('/v1/chat/completions') && !endpoint.endsWith('/chat/completions')) {
+          endpoint = endpoint.replace(/\/$/, '') + '/v1/chat/completions';
+        }
+        apiUrl = endpoint;
         headers = {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiConfig.apiKey}`,
