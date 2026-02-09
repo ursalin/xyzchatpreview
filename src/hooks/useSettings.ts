@@ -40,13 +40,25 @@ export function useSettings() {
 
   const buildSystemPrompt = useCallback(() => {
     const { character } = settings;
+    const now = new Date();
+    const timeStr = now.toLocaleString('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      weekday: 'long',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
     return `你是${character.name}，${character.persona}。
 
 背景故事：${character.background}
 
 说话风格：${character.speakingStyle}
 
-请始终保持角色设定，用中文回复，语气要自然亲切。`;
+当前时间：${timeStr}
+
+请始终保持角色设定，用中文回复，语气要自然亲切。注意当前时间，根据时间自然地调整对话（比如早上说早安，晚上说晚安等）。`;
   }, [settings]);
 
   return {
