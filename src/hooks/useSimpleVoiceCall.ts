@@ -284,8 +284,17 @@ export function useSimpleVoiceCall({
       }
 
       // 自动播放 TTS
+      console.log('[TTS] Auto-play check:', { 
+        hasContent: !!assistantContent, 
+        contentLength: assistantContent?.length,
+        enabled: settingsRef.current.voiceConfig.enabled,
+        hasApiKey: !!settingsRef.current.voiceConfig.minimaxApiKey,
+      });
       if (assistantContent && settingsRef.current.voiceConfig.enabled) {
+        console.log('[TTS] Triggering speak for:', assistantContent.substring(0, 30) + '...');
         await speak(assistantContent);
+      } else {
+        console.warn('[TTS] Skipped! Content empty or voice disabled');
       }
 
       return assistantContent;
