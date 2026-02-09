@@ -26,6 +26,13 @@ const VideoCall = () => {
   const [selectedMsgIds, setSelectedMsgIds] = useState<Set<string>>(new Set());
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
+  const [hideCharacter, setHideCharacter] = useState(() => {
+    return localStorage.getItem('videocall-hide-character') === 'true';
+  });
+  const [customBgUrl, setCustomBgUrl] = useState<string | null>(() => {
+    return localStorage.getItem('videocall-custom-bg') || null;
+  });
+  const bgInputRef = useRef<HTMLInputElement>(null);
   
   const live2dPanelRef = useRef<Live2DPanelRef>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -191,6 +198,31 @@ const VideoCall = () => {
     }
   };
 
+  // 切换隐藏角色
+  const handleToggleCharacter = () => {
+    const newVal = !hideCharacter;
+    setHideCharacter(newVal);
+    localStorage.setItem('videocall-hide-character', String(newVal));
+  };
+
+  // 上传背景图
+  const handleBgUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      alert('图片不能超过5MB');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      setCustomBgUrl(dataUrl);
+      localStorage.setItem('videocall-custom-bg', dataUrl);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
   // 清理
   useEffect(() => {
     return () => {
@@ -203,14 +235,23 @@ const VideoCall = () => {
 
   return (
     <div className="h-screen w-full bg-black relative overflow-hidden">
-      {/* 角色全屏背景 */}
+      {/* 角色全屏背景 / 自定义背景 */}
       <div className="absolute inset-0 z-0">
-        <Live2DPanel 
-          ref={live2dPanelRef}
-          isSpeaking={isPlaying} 
-          lipsyncVideoUrl={lipsyncVideoUrl}
-          isGeneratingLipsync={isGeneratingLipsync}
-        />
+        {hideCharacter ? (
+          // 自定义背景 / 默认渐变
+          customBgUrl ? (
+            <img src={customBgUrl} alt="背景" className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900" />
+          )
+        ) : (
+          <Live2DPanel 
+            ref={live2dPanelRef}
+            isSpeaking={isPlaying} 
+            lipsyncVideoUrl={lipsyncVideoUrl}
+            isGeneratingLipsync={isGeneratingLipsync}
+          />
+        )}
       </div>
 
       {/* 顶部状态栏 */}
@@ -244,6 +285,48 @@ const VideoCall = () => {
                   <Volume2 className="w-3 h-3" />
                   说话中
                 </span>
+              )}
+              {/* 隐藏角色按钮 */}
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="text-white hover:bg-white/20"
+                onClick={handleToggleCharacter}
+                title={hideCharacter ? "显示角色" : "隐藏角色"}
+              >
+                {hideCharacter ? (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                  </svg>
+                )}
+              </Button>
+              {/* 上传背景按钮（仅在隐藏角色时显示） */}
+              {hideCharacter && (
+                <>
+                  <input 
+                    ref={bgInputRef}
+                    type="file" 
+                    accept="image/*" 
+                    className="hidden" 
+                    onChange={handleBgUpload}
+                  />
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="text-white hover:bg-white/20"
+                    onClick={() => bgInputRef.current?.click()}
+                    title="上传背景图"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                  </Button>
+                </>
               )}
             </div>
           )}
