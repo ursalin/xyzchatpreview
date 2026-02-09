@@ -2,7 +2,7 @@ import { Message, VoiceConfig } from '@/types/chat';
 import { cn } from '@/lib/utils';
 import { User, Bot, Volume2, VolumeX, Loader2, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 
 interface ChatMessageProps {
   message: Message;
@@ -27,6 +27,7 @@ export function ChatMessage({
   const canSpeak = !isUser && voiceConfig?.enabled && voiceConfig?.minimaxApiKey && voiceConfig?.minimaxGroupId;
   const [showMenu, setShowMenu] = useState(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const didLongPress = useRef(false);
 
   const handleSpeak = async () => {
     if (onSpeak && canSpeak) {
@@ -38,24 +39,42 @@ export function ChatMessage({
     }
   };
 
-  // 长按开始
-  // 长按开始
-  const handlePressStart = () => {
-    longPressTimer.current = setTimeout(() => {
-      setShowMenu(true);
-    }, 500);
-  };
-
-  // 长按结束 / 取消
-  const handlePressCancel = () => {
+  const cancelTimer = useCallback(() => {
     if (longPressTimer.current) {
       clearTimeout(longPressTimer.current);
       longPressTimer.current = null;
     }
+  }, []);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    didLongPress.current = false;
+    longPressTimer.current = setTimeout(() => {
+      didLongPress.current = true;
+      // 震动反馈（如果支持）
+      if (navigator.vibrate) navigator.vibrate(30);
+      setShowMenu(true);
+    }, 600);
+  };
+
+  const handleTouchMove = () => {
+    cancelTimer();
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    cancelTimer();
+    // 如果刚触发了长按菜单，阻止后续 click 事件
+    if (didLongPress.current) {
+      e.preventDefault();
+    }
+  };
+
+  // 双击收藏（电脑端快捷方式）
+  const handleDoubleClick = () => {
+    onToggleStar?.(message.id);
   };
 
   return (
-    <div className="relative">
+    <div className="relative" style={{ WebkitUserSelect: 'none', userSelect: 'none' }}>
       <div
         className={cn(
           'flex gap-3 p-4 rounded-2xl max-w-[85%] animate-fade-in relative',
@@ -63,12 +82,10 @@ export function ChatMessage({
             ? 'ml-auto bg-primary text-primary-foreground'
             : 'mr-auto bg-muted'
         )}
-        onTouchStart={handlePressStart}
-        onTouchEnd={handlePressCancel}
-        onTouchMove={handlePressCancel}
-        onMouseDown={handlePressStart}
-        onMouseUp={handlePressCancel}
-        onMouseLeave={handlePressCancel}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onDoubleClick={handleDoubleClick}
         onContextMenu={(e) => {
           e.preventDefault();
           setShowMenu(true);
@@ -135,7 +152,7 @@ export function ChatMessage({
               onClick={() => window.open(message.imageUrl, '_blank')}
             />
           )}
-          <p className="whitespace-pre-wrap break-words">{message.content}</p>
+          <p className="whitespace-pre-wrap break-words" style={{ WebkitUserSelect: 'text', userSelect: 'text' }}>{message.content}</p>
         </div>
       </div>
 
@@ -143,7 +160,8 @@ export function ChatMessage({
       {showMenu && (
         <>
           <div 
-            className="fixed inset-0 z-40" 
+            className="fixed inset-0 z-40"
+            onTouchStart={() => setShowMenu(false)}
             onClick={() => setShowMenu(false)} 
           />
           <div className={cn(
@@ -151,7 +169,12 @@ export function ChatMessage({
             isUser ? "right-0 top-full mt-1" : "left-0 top-full mt-1"
           )}>
             <button
-              className="w-full px-4 py-2 text-sm text-left hover:bg-muted flex items-center gap-2"
+              className="w-full px-4 py-2 text-sm text-left hover:bg-muted flex items-center gap-2 active:bg-muted"
+              onTouchEnd={(e) => {
+                e.stopPropagation();
+                onToggleStar?.(message.id);
+                setShowMenu(false);
+              }}
               onClick={() => {
                 onToggleStar?.(message.id);
                 setShowMenu(false);
