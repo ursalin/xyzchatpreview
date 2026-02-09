@@ -7,7 +7,7 @@ import { ChatInput } from './ChatInput';
 import { SettingsPanel } from './SettingsPanel';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Trash2, MessageCircle, Brain, Star, ArrowLeft, X } from 'lucide-react';
+import { Trash2, MessageCircle, Brain, Star, ArrowLeft, X, Search } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import MemoryPanel from '@/components/memory/MemoryPanel';
 import { cn } from '@/lib/utils';
@@ -46,6 +46,9 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
   const [activeTab, setActiveTab] = useState('chat');
   const [showStarred, setShowStarred] = useState(false);
   const [highlightMsgId, setHighlightMsgId] = useState<string | null>(null);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<typeof messages>([]);
 
   useEffect(() => {
     onSpeakingChange?.(isPlaying);
@@ -102,6 +105,7 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
   // 跳转到收藏消息原位置
   const handleJumpToMessage = (messageId: string) => {
     setShowStarred(false);
+    setShowSearch(false);
     setActiveTab('chat');
     setHighlightMsgId(messageId);
     // 滚动到目标消息
@@ -113,6 +117,19 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
     }, 100);
   };
 
+  // 搜索消息
+  useEffect(() => {
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      const results = messages.filter(msg => 
+        msg.content.toLowerCase().includes(query)
+      );
+      setSearchResults(results);
+    } else {
+      setSearchResults([]);
+    }
+  }, [searchQuery, messages]);
+
   return (
     <div className="flex flex-col h-full bg-gradient-to-b from-background to-muted/20">
       {/* Header */}
@@ -122,6 +139,14 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
           <h1 className="font-semibold">{settings.title}</h1>
         </div>
         <div className="flex items-center gap-2">
+          {/* 搜索入口 */}
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            onClick={() => setShowSearch(!showSearch)}
+          >
+            <Search className={cn("w-4 h-4", showSearch && "text-primary")} />
+          </Button>
           {/* 收藏入口 */}
           <Button 
             variant="ghost" 
@@ -201,6 +226,90 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
                     <p className="text-sm line-clamp-3">{msg.content}</p>
                   </div>
                 ))}
+              </div>
+            )}
+          </ScrollArea>
+        </div>
+      )}
+
+      {/* 搜索面板 */}
+      {showSearch && (
+        <div className="absolute inset-0 z-30 bg-background flex flex-col">
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+            <Button variant="ghost" size="icon" onClick={() => { setShowSearch(false); setSearchQuery(''); }}>
+              <ArrowLeft className="w-5 h-5" />
+            </Button>
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="搜索消息..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                autoFocus
+                className="w-full pl-10 pr-8 py-2 rounded-full bg-muted border-none outline-none text-sm"
+              />
+              {searchQuery && (
+                <button
+                  className="absolute right-3 top-1/2 -translate-y-1/2"
+                  onClick={() => setSearchQuery('')}
+                >
+                  <X className="w-4 h-4 text-muted-foreground" />
+                </button>
+              )}
+            </div>
+          </div>
+          <ScrollArea className="flex-1 p-4">
+            {searchQuery.trim() === '' ? (
+              <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+                <Search className="w-12 h-12 mb-4 text-muted-foreground/30" />
+                <p>输入关键词搜索消息</p>
+              </div>
+            ) : searchResults.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+                <Search className="w-12 h-12 mb-4 text-muted-foreground/30" />
+                <p>没有找到相关消息</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground mb-2">找到 {searchResults.length} 条消息</p>
+                {searchResults.map((msg) => {
+                  // 高亮匹配的关键词
+                  const query = searchQuery.toLowerCase();
+                  const idx = msg.content.toLowerCase().indexOf(query);
+                  const start = Math.max(0, idx - 20);
+                  const end = Math.min(msg.content.length, idx + searchQuery.length + 40);
+                  const snippet = (start > 0 ? '...' : '') + msg.content.slice(start, end) + (end < msg.content.length ? '...' : '');
+                  
+                  return (
+                    <div
+                      key={msg.id}
+                      className="p-3 rounded-xl border border-border bg-card hover:bg-muted/50 cursor-pointer transition-colors"
+                      onClick={() => handleJumpToMessage(msg.id)}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {msg.role === 'user' ? '你' : settings.character.name}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {msg.timestamp.toLocaleString('zh-CN', {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                        {msg.starred && <Star className="w-3 h-3 text-yellow-500 fill-yellow-500 ml-auto" />}
+                      </div>
+                      <p className="text-sm" dangerouslySetInnerHTML={{
+                        __html: snippet.replace(
+                          new RegExp(`(${searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'),
+                          '<mark class="bg-yellow-300 dark:bg-yellow-600 rounded px-0.5">$1</mark>'
+                        )
+                      }} />
+                    </div>
+                  );
+                })}
               </div>
             )}
           </ScrollArea>
