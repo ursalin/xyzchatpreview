@@ -7,7 +7,7 @@ import { ChatInput } from './ChatInput';
 import { SettingsPanel } from './SettingsPanel';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Trash2, MessageCircle, Brain, Star, ArrowLeft, X, Search } from 'lucide-react';
+import { Trash2, MessageCircle, Brain, Star, ArrowLeft, X, Search, CheckSquare } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import MemoryPanel from '@/components/memory/MemoryPanel';
 import { cn } from '@/lib/utils';
@@ -50,6 +50,8 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<typeof messages>([]);
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [selectedMsgIds, setSelectedMsgIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     onSpeakingChange?.(isPlaying);
@@ -131,6 +133,34 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
     }
   }, [searchQuery, messages]);
 
+  // 多选相关
+  const handleToggleSelect = (msgId: string) => {
+    setSelectedMsgIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(msgId)) {
+        newSet.delete(msgId);
+      } else {
+        newSet.add(msgId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleSelectAll = () => {
+    setSelectedMsgIds(new Set(messages.map(m => m.id)));
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedMsgIds.size === 0) return;
+    deleteMessages(Array.from(selectedMsgIds));
+    setSelectedMsgIds(new Set());
+    setIsSelectMode(false);
+  };
+
+  const handleDeleteSingle = (msgId: string) => {
+    deleteMessages([msgId]);
+  };
+
   return (
     <div className="flex flex-col h-full bg-gradient-to-b from-background to-muted/20">
       {/* Header */}
@@ -163,13 +193,44 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
             )}
           </Button>
           <SettingsPanel settings={settings} onSettingsChange={updateSettings} />
-          {messages.length > 0 && activeTab === 'chat' && (
-            <Button variant="ghost" size="icon" onClick={clearMessages}>
-              <Trash2 className="w-4 h-4" />
-            </Button>
+          {messages.length > 0 && activeTab === 'chat' && !isSelectMode && (
+            <>
+              <Button variant="ghost" size="icon" onClick={() => { setIsSelectMode(true); setSelectedMsgIds(new Set()); }}>
+                <CheckSquare className="w-4 h-4" />
+              </Button>
+              <Button variant="ghost" size="icon" onClick={clearMessages}>
+                <Trash2 className="w-4 h-4" />
+              </Button>
+            </>
           )}
         </div>
       </div>
+
+      {/* 多选模式工具栏 */}
+      {isSelectMode && activeTab === 'chat' && (
+        <div className="flex items-center justify-between px-4 py-2 bg-muted border-b border-border">
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => { setIsSelectMode(false); setSelectedMsgIds(new Set()); }}>
+              取消
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleSelectAll}>
+              全选
+            </Button>
+          </div>
+          <span className="text-sm text-muted-foreground">
+            已选 {selectedMsgIds.size} 条
+          </span>
+          <Button 
+            variant="destructive" 
+            size="sm" 
+            onClick={handleDeleteSelected}
+            disabled={selectedMsgIds.size === 0}
+          >
+            <Trash2 className="w-4 h-4 mr-1" />
+            删除({selectedMsgIds.size})
+          </Button>
+        </div>
+      )}
 
       {/* 收藏列表面板 */}
       {showStarred && (
@@ -371,6 +432,10 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
                       isProcessing={currentPlayingId === message.id && isVoiceProcessing}
                       onToggleStar={toggleStarMessage}
                       onEdit={editMessage}
+                      onDelete={handleDeleteSingle}
+                      isSelectMode={isSelectMode}
+                      isSelected={selectedMsgIds.has(message.id)}
+                      onToggleSelect={handleToggleSelect}
                     />
                   </div>
                 ))}

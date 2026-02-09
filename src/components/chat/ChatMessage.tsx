@@ -1,6 +1,6 @@
 import { Message, VoiceConfig } from '@/types/chat';
 import { cn } from '@/lib/utils';
-import { User, Bot, Volume2, VolumeX, Loader2, Star, Pencil } from 'lucide-react';
+import { User, Bot, Volume2, VolumeX, Loader2, Star, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
 
@@ -13,6 +13,10 @@ interface ChatMessageProps {
   isProcessing?: boolean;
   onToggleStar?: (messageId: string) => void;
   onEdit?: (messageId: string, newContent: string) => void;
+  onDelete?: (messageId: string) => void;
+  isSelectMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (messageId: string) => void;
 }
 
 export function ChatMessage({ 
@@ -24,6 +28,10 @@ export function ChatMessage({
   isProcessing,
   onToggleStar,
   onEdit,
+  onDelete,
+  isSelectMode,
+  isSelected,
+  onToggleSelect,
 }: ChatMessageProps) {
   const isUser = message.role === 'user';
   const canSpeak = !isUser && voiceConfig?.enabled && voiceConfig?.minimaxApiKey && voiceConfig?.minimaxGroupId;
@@ -53,15 +61,34 @@ export function ChatMessage({
   };
 
   return (
-    <div className="relative">
-      <div
-        className={cn(
-          'flex gap-3 p-4 rounded-2xl max-w-[85%] animate-fade-in relative',
-          isUser
-            ? 'ml-auto bg-primary text-primary-foreground'
-            : 'mr-auto bg-muted'
-        )}
-      >
+    <div className="relative flex items-start gap-2">
+      {/* 多选复选框 */}
+      {isSelectMode && (
+        <div 
+          className="flex-shrink-0 mt-4 cursor-pointer"
+          onClick={() => onToggleSelect?.(message.id)}
+        >
+          <div className={cn(
+            "w-5 h-5 rounded border-2 flex items-center justify-center transition-colors",
+            isSelected ? "bg-primary border-primary" : "border-muted-foreground/40"
+          )}>
+            {isSelected && <span className="text-white text-xs">✓</span>}
+          </div>
+        </div>
+      )}
+      
+      <div className="flex-1">
+        <div
+          className={cn(
+            'flex gap-3 p-4 rounded-2xl max-w-[85%] animate-fade-in relative',
+            isUser
+              ? 'ml-auto bg-primary text-primary-foreground'
+              : 'mr-auto bg-muted',
+            isSelectMode && 'cursor-pointer',
+            isSelected && 'ring-2 ring-primary/50'
+          )}
+          onClick={isSelectMode ? () => onToggleSelect?.(message.id) : undefined}
+        >
         {/* 收藏标记 */}
         {message.starred && (
           <div className="absolute -top-1 -right-1">
@@ -154,7 +181,7 @@ export function ChatMessage({
           )}
 
           {/* 底部操作按钮 */}
-          {!isEditing && (
+          {!isEditing && !isSelectMode && (
             <div className={cn(
               "flex items-center gap-1 mt-2 pt-1",
               isUser ? "border-t border-primary-foreground/10" : "border-t border-border/50"
@@ -181,6 +208,17 @@ export function ChatMessage({
               >
                 <Pencil className="w-3.5 h-3.5" />
                 <span>编辑</span>
+              </button>
+
+              <button
+                className={cn(
+                  "flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-colors",
+                  isUser ? "text-primary-foreground/50 hover:text-red-400" : "text-muted-foreground hover:text-red-500"
+                )}
+                onClick={() => onDelete?.(message.id)}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>删除</span>
               </button>
             </div>
           )}
