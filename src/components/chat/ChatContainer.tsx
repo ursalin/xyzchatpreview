@@ -29,6 +29,7 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
     clearMessages,
     deleteMessages,
     toggleStarMessage,
+    editMessage,
     starredMessages,
     clearMemory,
     updateMemorySummary,
@@ -369,6 +370,7 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
                       isPlaying={currentPlayingId === message.id && isPlaying}
                       isProcessing={currentPlayingId === message.id && isVoiceProcessing}
                       onToggleStar={toggleStarMessage}
+                      onEdit={editMessage}
                     />
                   </div>
                 ))}

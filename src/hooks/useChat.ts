@@ -259,6 +259,13 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
     ));
   }, []);
 
+  // 编辑消息内容
+  const editMessage = useCallback((messageId: string, newContent: string) => {
+    setMessages(prev => prev.map(m => 
+      m.id === messageId ? { ...m, content: newContent } : m
+    ));
+  }, []);
+
   // 获取收藏的消息
   const starredMessages = useMemo(() => 
     messages.filter(m => m.starred), 
@@ -274,6 +281,7 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
     clearMessages,
     deleteMessages,
     toggleStarMessage,
+    editMessage,
     starredMessages,
     clearMemory,
     updateMemorySummary,
