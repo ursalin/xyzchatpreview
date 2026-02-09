@@ -4,13 +4,22 @@ import { ChatContainer } from '@/components/chat/ChatContainer';
 import Live2DPanel from '@/components/live2d/Live2DPanel';
 import { useSettings } from '@/hooks/useSettings';
 import { Button } from '@/components/ui/button';
-import { PanelLeftClose, PanelLeft, Video, Phone } from 'lucide-react';
+import { PanelLeftClose, PanelLeft, Video, Phone, Eye, EyeOff } from 'lucide-react';
 
 const Index = () => {
   const { settings } = useSettings();
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [mood, setMood] = useState<'happy' | 'neutral' | 'thinking'>('neutral');
-  const [showAvatar, setShowAvatar] = useState(true);
+  const [showAvatar, setShowAvatar] = useState(() => {
+    const saved = localStorage.getItem('index-show-avatar');
+    return saved !== null ? saved !== 'false' : true;
+  });
+
+  const toggleAvatar = () => {
+    const newVal = !showAvatar;
+    setShowAvatar(newVal);
+    localStorage.setItem('index-show-avatar', String(newVal));
+  };
 
   return (
     <div className="h-screen w-full flex flex-col md:flex-row bg-background">
@@ -21,7 +30,12 @@ const Index = () => {
             <Video className="w-4 h-4" />
           </Button>
         </Link>
-        <span className="text-sm font-medium">{settings.character.name}</span>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">{settings.character.name}</span>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={toggleAvatar}>
+            {showAvatar ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          </Button>
+        </div>
         <Link to="/realtime-call">
           <Button variant="default" size="icon" className="h-9 w-9">
             <Phone className="w-4 h-4" />
@@ -30,9 +44,11 @@ const Index = () => {
       </div>
 
       {/* Mobile: Avatar Area (below nav bar) */}
-      <div className="md:hidden w-full h-[35vh] min-h-[200px] max-h-[280px] mt-[52px] flex-shrink-0">
-        <Live2DPanel isSpeaking={isSpeaking} />
-      </div>
+      {showAvatar && (
+        <div className="md:hidden w-full h-[35vh] min-h-[200px] max-h-[280px] mt-[52px] flex-shrink-0">
+          <Live2DPanel isSpeaking={isSpeaking} />
+        </div>
+      )}
 
       {/* Desktop: Live2D Avatar Panel (left side) */}
       {showAvatar && (
@@ -42,13 +58,13 @@ const Index = () => {
       )}
       
       {/* Chat Panel */}
-      <div className={`flex-1 flex flex-col relative min-h-0 ${showAvatar ? '' : 'max-w-4xl mx-auto w-full'}`}>
+      <div className={`flex-1 flex flex-col relative min-h-0 ${!showAvatar ? 'md:max-w-4xl md:mx-auto md:w-full' : ''} ${!showAvatar ? 'mt-[52px] md:mt-0' : 'md:mt-0'}`}>
         {/* Desktop: Top Controls */}
         <div className="hidden md:flex absolute top-3 left-3 z-50 items-center gap-2">
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => setShowAvatar(!showAvatar)}
+            onClick={toggleAvatar}
           >
             {showAvatar ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeft className="w-4 h-4" />}
           </Button>
