@@ -31,24 +31,17 @@ const Live2DPanel = forwardRef<Live2DPanelRef, Live2DPanelProps>(({
     playPresetAnimation: async (audioBase64: string) => {
       console.log('Live2DPanel: Starting synced preset animation playback');
       
-      // 如果有预设动画，使用同步播放
-      if (hasAnimations) {
-        await playSynced(
-          audioBase64,
-          () => console.log('Preset animation started'),
-          () => console.log('Preset animation ended')
-        );
-      } else {
-        // 没有预设动画时，加速idle视频模拟说话
-        videoAvatarRef.current?.playPresetAnimation();
-        
-        // 直接播放音频
-        const audioUrl = `data:audio/mpeg;base64,${audioBase64}`;
-        const audio = new Audio(audioUrl);
-        await audio.play();
-      }
+      // 触发视频加速动画（如果有）
+      videoAvatarRef.current?.playPresetAnimation();
+      
+      // 始终用 playSynced 播放音频（有移动端兼容处理：playsInline、oncanplaythrough 等）
+      await playSynced(
+        audioBase64,
+        () => console.log('Audio playback started'),
+        () => console.log('Audio playback ended')
+      );
     },
-  }), [playSynced, hasAnimations]);
+  }), [playSynced]);
 
   return (
     <div className="w-full h-full min-h-[400px] rounded-xl overflow-hidden bg-gradient-to-br from-primary/5 via-background to-secondary/5 relative">

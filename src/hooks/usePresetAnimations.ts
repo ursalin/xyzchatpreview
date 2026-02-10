@@ -96,37 +96,60 @@ export function usePresetAnimations() {
     audio.preload = 'auto';
     (audio as any).playsInline = true;
     (audio as any).webkitPlaysInline = true;
-    audio.src = audioUrl;
     audioRef.current = audio;
 
     return new Promise((resolve) => {
-      audio.oncanplaythrough = () => {
+      let started = false;
+      let resolved = false;
+
+      const doResolve = () => {
+        if (resolved) return;
+        resolved = true;
+        setIsPlaying(false);
+        onEnd?.();
+        resolve();
+      };
+
+      const tryPlay = () => {
+        if (started) return;
+        started = true;
         setIsPlaying(true);
         onStart?.();
-        audio.play().catch(() => {});
+        audio.play().catch((err) => {
+          console.error('[PresetAnim] play() rejected:', err);
+          doResolve();
+        });
       };
 
-      audio.onended = () => {
-        setIsPlaying(false);
-        onEnd?.();
-        resolve();
+      audio.oncanplaythrough = tryPlay;
+
+      // 备用：有些移动端浏览器不触发 canplaythrough，用 loadeddata 兜底
+      audio.onloadeddata = () => {
+        setTimeout(() => {
+          if (!started) {
+            console.log('[PresetAnim] canplaythrough not fired, using loadeddata fallback');
+            tryPlay();
+          }
+        }, 200);
       };
 
-      audio.onerror = () => {
-        setIsPlaying(false);
-        onEnd?.();
-        resolve();
-      };
+      audio.onended = doResolve;
+      audio.onerror = doResolve;
 
-      // 超时保护
+      // 超时保护：15秒
       setTimeout(() => {
-        if (!audio.ended && audio.paused) {
-          setIsPlaying(false);
-          onEnd?.();
-          resolve();
+        if (!resolved) {
+          console.warn('[PresetAnim] Timeout, forcing resolve');
+          if (!started) {
+            // 从未开始播放，尝试强制播放一次
+            tryPlay();
+          }
+          // 再给5秒让它播完
+          setTimeout(doResolve, 5000);
         }
-      }, 30000);
+      }, 15000);
 
+      audio.src = audioUrl;
       audio.load();
     });
   }, []);

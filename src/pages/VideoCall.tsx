@@ -85,7 +85,17 @@ const VideoCall = () => {
     },
     onLipsyncVideoReady: setLipsyncVideoUrl,
     onPresetAnimationTrigger: async (audioBase64) => {
-      await live2dPanelRef.current?.playPresetAnimation(audioBase64);
+      if (live2dPanelRef.current) {
+        await live2dPanelRef.current.playPresetAnimation(audioBase64);
+      } else {
+        // 角色隐藏时 Live2DPanel 未渲染，直接播放音频
+        console.log('[VideoCall] Live2DPanel not mounted, playing audio directly');
+        const audioUrl = `data:audio/mpeg;base64,${audioBase64}`;
+        const audio = new Audio(audioUrl);
+        (audio as any).playsInline = true;
+        (audio as any).webkitPlaysInline = true;
+        await audio.play();
+      }
     },
   });
 
