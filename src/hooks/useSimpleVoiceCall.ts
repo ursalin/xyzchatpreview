@@ -201,6 +201,22 @@ export function useSimpleVoiceCall({
     try {
       // 用 ref 读取最新 messages 构建上下文
       const currentMessages = messagesRef.current;
+      
+      // 每次发消息时实时注入当前时间
+      const nowStr = new Date().toLocaleString('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        weekday: 'long',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      const realtimePrompt = systemPromptRef.current.replace(
+        /当前时间：.*/,
+        `当前时间：${nowStr}`
+      );
+      
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`,
         {
@@ -214,7 +230,7 @@ export function useSimpleVoiceCall({
               role: m.role,
               content: m.content,
             })),
-            systemPrompt: systemPromptRef.current,
+            systemPrompt: realtimePrompt,
           }),
         }
       );

@@ -127,10 +127,24 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiConfig.apiKey}`,
         };
+        // 每次发消息时实时注入当前时间
+        const nowStr = new Date().toLocaleString('zh-CN', {
+          timeZone: 'Asia/Shanghai',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          weekday: 'long',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+        const realtimePrompt = systemPrompt.replace(
+          /当前时间：.*/,
+          `当前时间：${nowStr}`
+        );
         body = {
           model: apiConfig.model || 'gpt-4o',
           messages: [
-            { role: 'system', content: systemPrompt },
+            { role: 'system', content: realtimePrompt },
             ...apiMessages,
           ],
           stream: true,
