@@ -312,9 +312,11 @@ export function useSimpleVoiceCall({
       });
       if (assistantContent && settingsRef.current.voiceConfig.enabled) {
         console.log('[TTS] Triggering speak for:', assistantContent.substring(0, 30) + '...');
+        import('sonner').then(({ toast }) => toast.info(`🔊 TTS开始: "${assistantContent.substring(0, 20)}..."`));
         await speak(assistantContent);
       } else {
         console.warn('[TTS] Skipped! Content empty or voice disabled');
+        import('sonner').then(({ toast }) => toast.warning(`⚠️ TTS跳过: 内容=${!!assistantContent}, 语音开关=${settingsRef.current.voiceConfig.enabled}, API Key=${!!settingsRef.current.voiceConfig.minimaxApiKey}`));
       }
 
       return assistantContent;
