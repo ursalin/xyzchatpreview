@@ -283,6 +283,27 @@ export function SettingsPanel({ settings, onSettingsChange }: SettingsPanelProps
                 </div>
 
                 <div className="grid gap-2">
+                  <Label htmlFor="ttsModel">语音模型</Label>
+                  <Select
+                    value={localSettings.voiceConfig.ttsModel || 'speech-01-turbo'}
+                    onValueChange={(value) => updateVoiceConfig({ ttsModel: value })}
+                  >
+                    <SelectTrigger id="ttsModel">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="speech-01-turbo">speech-01-turbo（快速）</SelectItem>
+                      <SelectItem value="speech-01-hd">speech-01-hd（高清）</SelectItem>
+                      <SelectItem value="speech-02-turbo">speech-02-turbo（新一代快速）</SelectItem>
+                      <SelectItem value="speech-02-hd">speech-02-hd（新一代高清）</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    turbo 便宜快速，hd 音质更好但更贵
+                  </p>
+                </div>
+
+                <div className="grid gap-2">
                   <Label htmlFor="lipsyncMode">动画模式</Label>
                   <Select
                     value={localSettings.voiceConfig.lipsyncMode || 'preset'}

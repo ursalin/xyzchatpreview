@@ -37,6 +37,7 @@ export interface VoiceConfig {
   minimaxApiKey: string;
   minimaxGroupId: string;
   voiceId: string;
+  ttsModel: string;
   lipsyncMode: LipsyncMode;
   lipsyncEngine: LipsyncEngine;
   // 豆包实时通话语音配置
@@ -70,6 +71,7 @@ export const defaultVoiceConfig: VoiceConfig = {
   minimaxApiKey: 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJHcm91cE5hbWUiOiLmnpflspoiLCJVc2VyTmFtZSI6Iuael-WymiIsIkFjY291bnQiOiIiLCJTdWJqZWN0SUQiOiIxNzY4NTM2ODA1NjIxMTIxODYxIiwiUGhvbmUiOiIxOTk3MjI2ODY3MiIsIkdyb3VwSUQiOiIxNzY4NTM2ODA1NTc0OTg0NTE3IiwiUGFnZU5hbWUiOiIiLCJNYWlsIjoiNzQxOTcxOTY4QHFxLmNvbSIsIkNyZWF0ZVRpbWUiOiIyMDI1LTEyLTI1IDEwOjM0OjA4IiwiVG9rZW5UeXBlIjoxLCJpc3MiOiJtaW5pbWF4In0.E0WBkx_WGBdgLffYFvRaZF-_gWoHOy8BhTXnG9EtsuikbASLH_DkIySeB3-e6tL-F6RZHSDTr77F-iCyiSUqYbfHlbUBuWeXeI1eopeZ3jWiWlHgyVCvTBVA6qVwCc_sf_7ozh9LKkoEDD1z4CJVGeyvnFkqSgx1us-NKVx4lmx_Lqnhl_p1HlUxgGuyXUguE5Z8ZVXSq2ok6k0-6VgzJt9e0cp4G0mPyCYYSXz_VKs1Hi7JtYpKfuazTLrxjY2LmuEI8e-FHM82vZWVIlK2QVb0DhXydA5vlGLDSBc3wXVSSX5LQb2YV769ynjsgAsjBeLnvqZcpSWF-h9-CivqEg',
   minimaxGroupId: '1768536805574984517',
   voiceId: 'XYZ_sbsyoubqql',  // 自定义克隆声音
+  ttsModel: 'speech-01-turbo',
   lipsyncMode: 'preset',
   lipsyncEngine: 'musetalk',
   doubaoVoiceId: '',  // 豆包克隆语音ID，如 S_xxx 格式
