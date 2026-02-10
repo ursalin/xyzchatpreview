@@ -128,7 +128,8 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
           'Authorization': `Bearer ${apiConfig.apiKey}`,
         };
         // 每次发消息时实时注入当前时间
-        const nowStr = new Date().toLocaleString('zh-CN', {
+        const nowDate = new Date();
+        const nowStr = nowDate.toLocaleString('zh-CN', {
           timeZone: 'Asia/Shanghai',
           year: 'numeric',
           month: 'long',
@@ -137,9 +138,11 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
           hour: '2-digit',
           minute: '2-digit',
         });
+        const cnHour = parseInt(nowDate.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour: 'numeric', hour12: false }));
+        const period = cnHour < 6 ? '凌晨' : cnHour < 9 ? '早上' : cnHour < 12 ? '上午' : cnHour < 14 ? '中午' : cnHour < 18 ? '下午' : cnHour < 22 ? '晚上' : '深夜';
         const realtimePrompt = systemPrompt.replace(
           /当前时间：.*/,
-          `当前时间：${nowStr}`
+          `当前时间：${nowStr}（${period}）`
         );
         body = {
           model: apiConfig.model || 'gpt-4o',

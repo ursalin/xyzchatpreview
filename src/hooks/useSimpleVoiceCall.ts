@@ -203,7 +203,8 @@ export function useSimpleVoiceCall({
       const currentMessages = messagesRef.current;
       
       // 每次发消息时实时注入当前时间
-      const nowStr = new Date().toLocaleString('zh-CN', {
+      const nowDate = new Date();
+      const nowStr = nowDate.toLocaleString('zh-CN', {
         timeZone: 'Asia/Shanghai',
         year: 'numeric',
         month: 'long',
@@ -212,9 +213,11 @@ export function useSimpleVoiceCall({
         hour: '2-digit',
         minute: '2-digit',
       });
+      const cnHour = parseInt(nowDate.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour: 'numeric', hour12: false }));
+      const period = cnHour < 6 ? '凌晨' : cnHour < 9 ? '早上' : cnHour < 12 ? '上午' : cnHour < 14 ? '中午' : cnHour < 18 ? '下午' : cnHour < 22 ? '晚上' : '深夜';
       const realtimePrompt = systemPromptRef.current.replace(
         /当前时间：.*/,
-        `当前时间：${nowStr}`
+        `当前时间：${nowStr}（${period}）`
       );
       
       const response = await fetch(
