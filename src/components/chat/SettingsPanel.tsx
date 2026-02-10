@@ -294,8 +294,12 @@ export function SettingsPanel({ settings, onSettingsChange }: SettingsPanelProps
                     <SelectContent>
                       <SelectItem value="speech-01-turbo">speech-01-turbo（快速）</SelectItem>
                       <SelectItem value="speech-01-hd">speech-01-hd（高清）</SelectItem>
-                      <SelectItem value="speech-02-turbo">speech-02-turbo（新一代快速）</SelectItem>
-                      <SelectItem value="speech-02-hd">speech-02-hd（新一代高清）</SelectItem>
+                      <SelectItem value="speech-02-turbo">speech-02-turbo（二代快速）</SelectItem>
+                      <SelectItem value="speech-02-hd">speech-02-hd（二代高清）</SelectItem>
+                      <SelectItem value="speech-2.6-turbo">speech-2.6-turbo</SelectItem>
+                      <SelectItem value="speech-2.6-hd">speech-2.6-hd</SelectItem>
+                      <SelectItem value="speech-2.8-turbo">speech-2.8-turbo（最新快速）</SelectItem>
+                      <SelectItem value="speech-2.8-hd">speech-2.8-hd（最新高清）</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
