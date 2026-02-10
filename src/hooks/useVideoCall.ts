@@ -625,6 +625,24 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
       // 截取当前画面
       const image = includeImage ? captureFrame() : null;
       
+      // 每次发消息时实时注入当前时间
+      const nowDate = new Date();
+      const nowStr = nowDate.toLocaleString('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        weekday: 'long',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      const cnHour = parseInt(nowDate.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour: 'numeric', hour12: false }));
+      const period = cnHour < 6 ? '凌晨' : cnHour < 9 ? '早上' : cnHour < 12 ? '上午' : cnHour < 14 ? '中午' : cnHour < 18 ? '下午' : cnHour < 22 ? '晚上' : '深夜';
+      const realtimePrompt = systemPrompt.replace(
+        /当前时间：.*/,
+        `当前时间：${nowStr}（${period}）`
+      );
+
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/vision-chat`,
         {
@@ -635,7 +653,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
           },
           body: JSON.stringify({
             messages: contextMessages,
-            systemPrompt,
+            systemPrompt: realtimePrompt,
             image,
           }),
         }
@@ -710,7 +728,10 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
 
       // 自动播放TTS
       if (assistantContent && settings.voiceConfig.enabled) {
+        import('sonner').then(({ toast }) => toast.info(`🔊 TTS开始: "${assistantContent.substring(0, 20)}..."`));
         await speak(assistantContent);
+      } else {
+        import('sonner').then(({ toast }) => toast.warning(`⚠️ TTS跳过: 内容=${!!assistantContent}, 语音=${settings.voiceConfig.enabled}`));
       }
 
       return assistantContent;
