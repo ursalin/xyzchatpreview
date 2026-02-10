@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Message, AppSettings } from '@/types/chat';
 import { useMemoryManager } from './useMemoryManager';
 
@@ -42,6 +42,10 @@ function loadStoredMessages(): Message[] {
 export function useChat(settings: AppSettings, systemPrompt: string) {
   const [messages, setMessages] = useState<Message[]>(() => loadStoredMessages());
   const [isLoading, setIsLoading] = useState(false);
+
+  // 撤回删除支持
+  const lastDeletedRef = useRef<Message[] | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 使用记忆管理器
   const {
@@ -256,18 +260,45 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
   }, [messages, settings, systemPrompt, checkAndSummarize, buildContextMessages]);
 
   const clearMessages = useCallback(() => {
-    setMessages([]);
+    // 保存快照用于撤回
+    setMessages(prev => {
+      lastDeletedRef.current = prev;
+      return [];
+    });
     try {
       localStorage.removeItem(CHAT_HISTORY_KEY);
     } catch (e) {
       console.error('Failed to clear chat history:', e);
     }
+    // 5秒后清除撤回快照
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    undoTimerRef.current = setTimeout(() => { lastDeletedRef.current = null; }, 5000);
   }, []);
 
   // 删除指定消息
   const deleteMessages = useCallback((messageIds: string[]) => {
-    setMessages(prev => prev.filter(m => !messageIds.includes(m.id)));
+    setMessages(prev => {
+      const deleted = prev.filter(m => messageIds.includes(m.id));
+      if (deleted.length > 0) {
+        lastDeletedRef.current = prev; // 保存完整快照
+      }
+      return prev.filter(m => !messageIds.includes(m.id));
+    });
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    undoTimerRef.current = setTimeout(() => { lastDeletedRef.current = null; }, 5000);
   }, []);
+
+  // 撤回删除
+  const undoDelete = useCallback(() => {
+    if (lastDeletedRef.current) {
+      setMessages(lastDeletedRef.current);
+      lastDeletedRef.current = null;
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    }
+  }, []);
+
+  // 是否可以撤回
+  const canUndo = lastDeletedRef.current !== null;
 
   // 切换收藏状态
   const toggleStarMessage = useCallback((messageId: string) => {
@@ -297,6 +328,7 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
     sendMessage,
     clearMessages,
     deleteMessages,
+    undoDelete,
     toggleStarMessage,
     editMessage,
     starredMessages,

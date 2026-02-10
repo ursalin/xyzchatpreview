@@ -135,6 +135,9 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
   const lipsyncCacheRef = useRef<Map<string, LipsyncCacheEntry>>(loadCache());
   const pendingTranscriptRef = useRef<string>('');
 
+  // 撤回删除支持
+  const lastDeletedRef = useRef<Message[] | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 使用记忆管理器
   const {
     memorySummary,
@@ -796,17 +799,39 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
 
   // 清除消息
   const clearMessages = useCallback(() => {
-    setMessages([]);
+    setMessages(prev => {
+      lastDeletedRef.current = prev;
+      return [];
+    });
     try {
       localStorage.removeItem(CHAT_HISTORY_KEY);
     } catch (e) {
       console.error('Failed to clear chat history:', e);
     }
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    undoTimerRef.current = setTimeout(() => { lastDeletedRef.current = null; }, 5000);
   }, []);
 
   // 删除指定消息
   const deleteMessages = useCallback((messageIds: string[]) => {
-    setMessages(prev => prev.filter(m => !messageIds.includes(m.id)));
+    setMessages(prev => {
+      const deleted = prev.filter(m => messageIds.includes(m.id));
+      if (deleted.length > 0) {
+        lastDeletedRef.current = prev;
+      }
+      return prev.filter(m => !messageIds.includes(m.id));
+    });
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    undoTimerRef.current = setTimeout(() => { lastDeletedRef.current = null; }, 5000);
+  }, []);
+
+  // 撤回删除
+  const undoDelete = useCallback(() => {
+    if (lastDeletedRef.current) {
+      setMessages(lastDeletedRef.current);
+      lastDeletedRef.current = null;
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    }
   }, []);
 
   // 编辑指定消息
@@ -843,6 +868,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     sendMessage,
     clearMessages,
     deleteMessages,
+    undoDelete,
     editMessage,
     clearMemory,
     updateMemorySummary,

@@ -28,6 +28,7 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
     sendMessage, 
     clearMessages,
     deleteMessages,
+    undoDelete,
     toggleStarMessage,
     editMessage,
     starredMessages,
@@ -52,6 +53,8 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
   const [searchResults, setSearchResults] = useState<typeof messages>([]);
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedMsgIds, setSelectedMsgIds] = useState<Set<string>>(new Set());
+  const [showUndoBar, setShowUndoBar] = useState(false);
+  const undoBarTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     onSpeakingChange?.(isPlaying);
@@ -155,10 +158,25 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
     deleteMessages(Array.from(selectedMsgIds));
     setSelectedMsgIds(new Set());
     setIsSelectMode(false);
+    showUndoToast();
   };
 
   const handleDeleteSingle = (msgId: string) => {
     deleteMessages([msgId]);
+    showUndoToast();
+  };
+
+  // 撤回提示
+  const showUndoToast = () => {
+    setShowUndoBar(true);
+    if (undoBarTimerRef.current) clearTimeout(undoBarTimerRef.current);
+    undoBarTimerRef.current = setTimeout(() => setShowUndoBar(false), 5000);
+  };
+
+  const handleUndo = () => {
+    undoDelete();
+    setShowUndoBar(false);
+    if (undoBarTimerRef.current) clearTimeout(undoBarTimerRef.current);
   };
 
   return (
@@ -198,7 +216,7 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
               <Button variant="ghost" size="icon" onClick={() => { setIsSelectMode(true); setSelectedMsgIds(new Set()); }}>
                 <CheckSquare className="w-4 h-4" />
               </Button>
-              <Button variant="ghost" size="icon" onClick={clearMessages}>
+              <Button variant="ghost" size="icon" onClick={() => { clearMessages(); showUndoToast(); }}>
                 <Trash2 className="w-4 h-4" />
               </Button>
             </>
@@ -451,6 +469,19 @@ export function ChatContainer({ onSpeakingChange, onMoodChange }: ChatContainerP
               </div>
             )}
           </ScrollArea>
+
+          {/* 撤回删除提示条 */}
+          {showUndoBar && (
+            <div className="flex items-center justify-center gap-3 py-2 px-4 bg-muted/80 backdrop-blur-sm border-t border-border">
+              <span className="text-sm text-muted-foreground">消息已删除</span>
+              <button
+                onClick={handleUndo}
+                className="text-primary font-medium text-sm hover:underline"
+              >
+                撤回
+              </button>
+            </div>
+          )}
 
           {/* Input */}
           <ChatInput 

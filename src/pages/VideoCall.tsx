@@ -26,6 +26,8 @@ const VideoCall = () => {
   const [selectedMsgIds, setSelectedMsgIds] = useState<Set<string>>(new Set());
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
+  const [showUndoBar, setShowUndoBar] = useState(false);
+  const undoBarTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hideCharacter, setHideCharacter] = useState(() => {
     return localStorage.getItem('videocall-hide-character') === 'true';
   });
@@ -75,6 +77,7 @@ const VideoCall = () => {
     sendMessage,
     clearMessages,
     deleteMessages,
+    undoDelete,
     editMessage,
     stopPlaying,
   } = useVideoCall({
@@ -100,6 +103,20 @@ const VideoCall = () => {
   });
 
   // 静默检测：8秒没有活动（说话/回复），角色自动问候
+  // 显示撤回条
+  const showUndoToast = useCallback(() => {
+    setShowUndoBar(true);
+    if (undoBarTimerRef.current) clearTimeout(undoBarTimerRef.current);
+    undoBarTimerRef.current = setTimeout(() => setShowUndoBar(false), 5000);
+  }, []);
+
+  // 执行撤回
+  const handleUndo = useCallback(() => {
+    undoDelete();
+    setShowUndoBar(false);
+    if (undoBarTimerRef.current) clearTimeout(undoBarTimerRef.current);
+  }, [undoDelete]);
+
   const SILENCE_TIMEOUT = 8000;
 
   // 重置静默计时器
@@ -402,6 +419,7 @@ const VideoCall = () => {
                     deleteMessages(Array.from(selectedMsgIds));
                     setSelectedMsgIds(new Set());
                     setIsSelectMode(false);
+                    showUndoToast();
                   }}
                 >
                   <Trash2 className="h-3 w-3 mr-1" />
@@ -569,6 +587,19 @@ const VideoCall = () => {
             ))}
             <div ref={messagesEndRef} />
           </div>
+        </div>
+      )}
+
+      {/* 撤回删除提示条 */}
+      {showUndoBar && (
+        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-30 bg-gray-800/90 backdrop-blur-sm text-white px-4 py-2.5 rounded-full flex items-center gap-3 shadow-lg animate-in fade-in slide-in-from-bottom-2">
+          <span className="text-sm">消息已删除</span>
+          <button
+            onClick={handleUndo}
+            className="text-blue-400 font-medium text-sm hover:text-blue-300 active:text-blue-200"
+          >
+            撤回
+          </button>
         </div>
       )}
 
