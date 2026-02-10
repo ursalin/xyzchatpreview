@@ -11,7 +11,7 @@ serve(async (req) => {
   }
 
   try {
-    const { messages, systemPrompt } = await req.json();
+    const { messages, systemPrompt, maxTokens } = await req.json();
     
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
@@ -36,6 +36,7 @@ serve(async (req) => {
           ...messages,
         ],
         stream: true,
+        ...(maxTokens ? { max_tokens: maxTokens } : {}),
       }),
     });
 

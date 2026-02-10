@@ -231,6 +231,7 @@ export function useSimpleVoiceCall({
               content: m.content,
             })),
             systemPrompt: realtimePrompt,
+            maxTokens: 100,
           }),
         }
       );
