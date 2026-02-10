@@ -478,6 +478,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     if (lipsyncMode === 'preset') {
       try {
         console.log('Generating TTS audio (preset mode)...');
+        import('sonner').then(({ toast }) => toast.info(`🎤 调用MiniMax TTS...`));
         const response = await fetch(
           `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/minimax-tts`,
           {
@@ -497,6 +498,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
 
         if (!response.ok) {
           const error = await response.json();
+          import('sonner').then(({ toast }) => toast.error(`❌ TTS API失败: ${error.error || response.status}`));
           throw new Error(error.error || 'TTS request failed');
         }
 
@@ -504,6 +506,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
         
         if (data.audioContent) {
           console.log('TTS audio ready, passing to preset animation system for synced playback...');
+          import('sonner').then(({ toast }) => toast.success(`✅ 音频就绪, 长度=${data.audioContent.length}, 有动画回调=${!!onPresetAnimationTrigger}`));
           
           // 将音频数据传递给预设动画系统，由它来处理同步播放
           if (onPresetAnimationTrigger) {
@@ -518,9 +521,12 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
             audio.onerror = () => setIsPlaying(false);
             await audio.play();
           }
+        } else {
+          import('sonner').then(({ toast }) => toast.error(`❌ TTS返回无音频数据`));
         }
       } catch (error) {
         console.error('TTS error:', error);
+        import('sonner').then(({ toast }) => toast.error(`❌ TTS异常: ${error instanceof Error ? error.message : '未知错误'}`));
       }
       return;
     }
@@ -724,6 +730,35 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
             break;
           }
         }
+      }
+
+      // 按句截断，控制在50字以内（找最近的句末标点）
+      let ttsContent = assistantContent;
+      if (ttsContent.length > 50) {
+        const punctuation = /[。！？~…]/g;
+        let lastGoodIndex = -1;
+        let match;
+        while ((match = punctuation.exec(ttsContent)) !== null) {
+          if (match.index + 1 <= 60) { // 留一点余量
+            lastGoodIndex = match.index + 1;
+          } else {
+            break;
+          }
+        }
+        if (lastGoodIndex > 0) {
+          ttsContent = ttsContent.substring(0, lastGoodIndex);
+        } else {
+          ttsContent = ttsContent.substring(0, 50);
+        }
+        // 更新显示的消息也截断
+        assistantContent = ttsContent;
+        setMessages(prev =>
+          prev.map(m =>
+            m.id === assistantMessageId
+              ? { ...m, content: assistantContent }
+              : m
+          )
+        );
       }
 
       // 自动播放TTS
