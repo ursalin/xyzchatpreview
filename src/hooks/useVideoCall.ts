@@ -732,35 +732,6 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
         }
       }
 
-      // 按句截断，控制在50字以内（找最近的句末标点）
-      let ttsContent = assistantContent;
-      if (ttsContent.length > 50) {
-        const punctuation = /[。！？~…]/g;
-        let lastGoodIndex = -1;
-        let match;
-        while ((match = punctuation.exec(ttsContent)) !== null) {
-          if (match.index + 1 <= 60) { // 留一点余量
-            lastGoodIndex = match.index + 1;
-          } else {
-            break;
-          }
-        }
-        if (lastGoodIndex > 0) {
-          ttsContent = ttsContent.substring(0, lastGoodIndex);
-        } else {
-          ttsContent = ttsContent.substring(0, 50);
-        }
-        // 更新显示的消息也截断
-        assistantContent = ttsContent;
-        setMessages(prev =>
-          prev.map(m =>
-            m.id === assistantMessageId
-              ? { ...m, content: assistantContent }
-              : m
-          )
-        );
-      }
-
       // 自动播放TTS
       if (assistantContent && settings.voiceConfig.enabled) {
         import('sonner').then(({ toast }) => toast.info(`🔊 TTS开始: "${assistantContent.substring(0, 20)}..."`));
