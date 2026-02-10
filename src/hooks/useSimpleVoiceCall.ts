@@ -185,6 +185,7 @@ export function useSimpleVoiceCall({
   const sendMessageToAI = useCallback(async (content: string) => {
     if (isLoading) {
       console.log('Already loading, skipping duplicate send');
+      import('sonner').then(({ toast }) => toast.warning('⏳ 上一条还在处理中，跳过'));
       return null;
     }
 
@@ -263,6 +264,7 @@ export function useSimpleVoiceCall({
       ]);
 
       let textBuffer = '';
+      import('sonner').then(({ toast }) => toast.info('📡 开始接收AI回复...'));
 
       while (true) {
         const { done, value } = await reader.read();
@@ -302,6 +304,8 @@ export function useSimpleVoiceCall({
           }
         }
       }
+
+      import('sonner').then(({ toast }) => toast.info(`📝 AI回复完成: ${assistantContent?.length || 0}字`));
 
       // 自动播放 TTS
       console.log('[TTS] Auto-play check:', { 
