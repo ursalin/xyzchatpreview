@@ -484,30 +484,21 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
         console.log('Generating TTS audio (preset mode), model:', ttsModel);
         import('sonner').then(({ toast }) => toast.info(`🎤 调用MiniMax TTS (${ttsModel})...`));
         
-        // 直接调 MiniMax API，不走 Supabase edge function
+        // 走 Supabase edge function（跟文字聊天一致）
         const response = await fetch(
-          `https://api.minimax.chat/v1/t2a_v2?GroupId=${voiceConfig.minimaxGroupId}`,
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/minimax-tts`,
           {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${voiceConfig.minimaxApiKey}`,
+              'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
             },
             body: JSON.stringify({
-              model: ttsModel,
               text: textToSpeak,
-              stream: false,
-              voice_setting: {
-                voice_id: voiceConfig.voiceId || 'Chinese (Mandarin)_Warm_Bestie',
-                speed: 1.0,
-                vol: 1.0,
-                pitch: 0,
-              },
-              audio_setting: {
-                sample_rate: 32000,
-                bitrate: 128000,
-                format: 'mp3',
-              },
+              apiKey: voiceConfig.minimaxApiKey,
+              groupId: voiceConfig.minimaxGroupId,
+              voiceId: voiceConfig.voiceId,
             }),
           }
         );
@@ -515,41 +506,18 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
         if (!response.ok) {
           const errorText = await response.text();
           import('sonner').then(({ toast }) => toast.error(`❌ TTS API失败: ${response.status}`));
-          throw new Error(`MiniMax API error: ${response.status} - ${errorText}`);
+          throw new Error(`TTS API error: ${response.status} - ${errorText}`);
         }
 
         const result = await response.json();
         
-        if (result.base_resp?.status_code !== 0) {
-          const errMsg = result.base_resp?.status_msg || 'MiniMax API error';
-          import('sonner').then(({ toast }) => toast.error(`❌ TTS错误: ${errMsg}`));
-          throw new Error(errMsg);
-        }
-
-        const audioHex = result.data?.audio;
-        if (!audioHex) {
-          import('sonner').then(({ toast }) => toast.error(`❌ TTS返回无音频数据`));
-          throw new Error('No audio data in response');
-        }
-
-        // Convert hex to base64
-        const bytes = new Uint8Array(audioHex.length / 2);
-        for (let i = 0; i < audioHex.length; i += 2) {
-          bytes[i / 2] = parseInt(audioHex.substring(i, i + 2), 16);
-        }
-        let binary = '';
-        for (let i = 0; i < bytes.length; i++) {
-          binary += String.fromCharCode(bytes[i]);
-        }
-        const audioBase64 = btoa(binary);
-
-        if (audioBase64) {
+        if (result.audioContent) {
           import('sonner').then(({ toast }) => toast.success(`✅ 音频就绪, 有动画回调=${!!onPresetAnimationTrigger}`));
           
           if (onPresetAnimationTrigger) {
-            await onPresetAnimationTrigger(audioBase64);
+            await onPresetAnimationTrigger(result.audioContent);
           } else {
-            const audioUrl = `data:audio/mpeg;base64,${audioBase64}`;
+            const audioUrl = `data:audio/mpeg;base64,${result.audioContent}`;
             const audio = new Audio(audioUrl);
             audioRef.current = audio;
             audio.onplay = () => setIsPlaying(true);
@@ -558,7 +526,7 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
             await audio.play();
           }
         } else {
-          import('sonner').then(({ toast }) => toast.error(`❌ 音频转换失败`));
+          import('sonner').then(({ toast }) => toast.error(`❌ TTS返回无音频数据`));
         }
       } catch (error) {
         console.error('TTS error:', error);
