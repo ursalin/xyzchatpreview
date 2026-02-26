@@ -577,45 +577,72 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
     }
 
     try {
-      // Step 1: 生成 TTS 音频
+      // Step 1: 生成 TTS 音频（直接调 MiniMax API，不走 Supabase）
       console.log('Generating TTS audio...');
+      const ttsModel = voiceConfig.ttsModel || 'speech-01-turbo';
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/minimax-tts`,
+        `https://api.minimax.chat/v1/t2a_v2?GroupId=${voiceConfig.minimaxGroupId}`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+            'Authorization': `Bearer ${voiceConfig.minimaxApiKey}`,
           },
           body: JSON.stringify({
+            model: ttsModel,
             text: textToSpeak,
-            apiKey: voiceConfig.minimaxApiKey,
-            groupId: voiceConfig.minimaxGroupId,
-            voiceId: voiceConfig.voiceId,
+            stream: false,
+            voice_setting: {
+              voice_id: voiceConfig.voiceId || 'Chinese (Mandarin)_Warm_Bestie',
+              speed: 1.0,
+              vol: 1.0,
+              pitch: 0,
+            },
+            audio_setting: {
+              sample_rate: 32000,
+              bitrate: 128000,
+              format: 'mp3',
+            },
           }),
         }
       );
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'TTS request failed');
+        const errorText = await response.text();
+        throw new Error(`MiniMax API error: ${response.status} - ${errorText}`);
       }
 
-      const data = await response.json();
+      const result = await response.json();
       
-      if (data.audioContent) {
+      if (result.base_resp?.status_code !== 0) {
+        throw new Error(result.base_resp?.status_msg || 'MiniMax API error');
+      }
+
+      const audioHex = result.data?.audio;
+      if (audioHex) {
+        // Convert hex to base64
+        const bytes = new Uint8Array(audioHex.length / 2);
+        for (let i = 0; i < audioHex.length; i += 2) {
+          bytes[i / 2] = parseInt(audioHex.substring(i, i + 2), 16);
+        }
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const audioBase64 = btoa(binary);
+
         // Step 2: 等待视频生成完成
         console.log('TTS audio ready, generating lipsync video...');
-        const videoUrl = await generateLipsyncVideo(data.audioContent, textToSpeak);
+        const videoUrl = await generateLipsyncVideo(audioBase64, textToSpeak);
         
         if (videoUrl) {
           // Step 3: 视频生成完成，同步播放音频和视频
           console.log('Video ready, playing synced audio and video');
-          await playSynced(data.audioContent, videoUrl);
+          await playSynced(audioBase64, videoUrl);
         } else {
           // 视频生成失败，仅播放音频
           console.log('Video generation failed, playing audio only');
-          const audioUrl = `data:audio/mpeg;base64,${data.audioContent}`;
+          const audioUrl = `data:audio/mpeg;base64,${audioBase64}`;
           const audio = new Audio(audioUrl);
           audioRef.current = audio;
           
