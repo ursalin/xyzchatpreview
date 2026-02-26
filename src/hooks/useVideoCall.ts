@@ -701,21 +701,35 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiConfig.apiKey}`,
         };
-        // Build messages array with optional image
-        const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
-        if (image) {
-          userContent.push({ type: 'image_url', image_url: { url: image } });
+
+        // Build messages for OpenAI-compatible API
+        const apiMessages = contextMessages.map(m => ({ role: m.role, content: m.content }));
+
+        // If we have an image, attach it to the last user message as multimodal content
+        if (image && apiMessages.length > 0) {
+          const lastIdx = apiMessages.length - 1;
+          if (apiMessages[lastIdx].role === 'user') {
+            (apiMessages[lastIdx] as any).content = [
+              { type: 'text', text: apiMessages[lastIdx].content || '请描述你看到的画面并继续对话' },
+              { type: 'image_url', image_url: { url: image } },
+            ];
+          } else {
+            // No user message at end, add one with the image
+            apiMessages.push({
+              role: 'user',
+              content: [
+                { type: 'text', text: '请描述你看到的画面并继续对话' },
+                { type: 'image_url', image_url: { url: image } },
+              ] as any,
+            });
+          }
         }
-        // Use last user message or a default prompt
-        const lastUserMsg = contextMessages[contextMessages.length - 1];
-        userContent.push({ type: 'text', text: lastUserMsg?.content || '请描述你看到的画面' });
 
         fetchBody = {
           model: apiConfig.model || 'gpt-4o',
           messages: [
             { role: 'system', content: realtimePrompt },
-            ...contextMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content })),
-            { role: 'user', content: image ? userContent : (lastUserMsg?.content || '请描述你看到的画面') },
+            ...apiMessages,
           ],
           stream: true,
         };
