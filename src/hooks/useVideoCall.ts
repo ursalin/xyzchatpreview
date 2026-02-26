@@ -685,21 +685,58 @@ export function useVideoCall({ settings, systemPrompt, onSpeakingChange, onLipsy
         `当前时间：${nowStr}（${period}）`
       );
 
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/vision-chat`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({
-            messages: contextMessages,
-            systemPrompt: realtimePrompt,
-            image,
-          }),
+      // Determine API endpoint — prefer custom API (same as text chat)
+      const { apiConfig } = settings;
+      let apiUrl: string;
+      let fetchHeaders: Record<string, string>;
+      let fetchBody: Record<string, unknown>;
+
+      if (apiConfig.useCustomApi && apiConfig.apiEndpoint && apiConfig.apiKey) {
+        let endpoint = apiConfig.apiEndpoint.trim();
+        if (!endpoint.endsWith('/v1/chat/completions') && !endpoint.endsWith('/chat/completions')) {
+          endpoint = endpoint.replace(/\/$/, '') + '/v1/chat/completions';
         }
-      );
+        apiUrl = endpoint;
+        fetchHeaders = {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiConfig.apiKey}`,
+        };
+        // Build messages array with optional image
+        const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+        if (image) {
+          userContent.push({ type: 'image_url', image_url: { url: image } });
+        }
+        // Use last user message or a default prompt
+        const lastUserMsg = contextMessages[contextMessages.length - 1];
+        userContent.push({ type: 'text', text: lastUserMsg?.content || '请描述你看到的画面' });
+
+        fetchBody = {
+          model: apiConfig.model || 'gpt-4o',
+          messages: [
+            { role: 'system', content: realtimePrompt },
+            ...contextMessages.slice(0, -1).map(m => ({ role: m.role, content: m.content })),
+            { role: 'user', content: image ? userContent : (lastUserMsg?.content || '请描述你看到的画面') },
+          ],
+          stream: true,
+        };
+      } else {
+        apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/vision-chat`;
+        fetchHeaders = {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        };
+        fetchBody = {
+          messages: contextMessages,
+          systemPrompt: realtimePrompt,
+          image,
+        };
+      }
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: fetchHeaders,
+        body: JSON.stringify(fetchBody),
+      });
 
       if (!response.ok) {
         if (response.status === 429) {
