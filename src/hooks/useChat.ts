@@ -3,6 +3,7 @@ import { Message, AppSettings } from '@/types/chat';
 import { useMemoryManager } from './useMemoryManager';
 
 const CHAT_HISTORY_KEY = 'ai-companion-chat-history';
+const FAVORITE_MESSAGES_KEY = 'ai-companion-favorites';
 const MAX_STORED_MESSAGES = 100; // 最多保存100条消息
 
 // 序列化消息用于存储
@@ -39,8 +40,22 @@ function loadStoredMessages(): Message[] {
   return [];
 }
 
+// 从 localStorage 加载收藏记录
+function loadFavoriteMessages(): Message[] {
+  try {
+    const stored = localStorage.getItem(FAVORITE_MESSAGES_KEY);
+    if (stored) {
+      return deserializeMessages(stored);
+    }
+  } catch (e) {
+    console.error('Failed to load favorites:', e);
+  }
+  return [];
+}
+
 export function useChat(settings: AppSettings, systemPrompt: string) {
   const [messages, setMessages] = useState<Message[]>(() => loadStoredMessages());
+  const [favoriteMessages, setFavoriteMessages] = useState<Message[]>(() => loadFavoriteMessages());
   const [isLoading, setIsLoading] = useState(false);
 
   // 撤回删除支持
@@ -69,6 +84,15 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
       }
     }
   }, [messages]);
+
+  // 保存收藏记录到 localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(FAVORITE_MESSAGES_KEY, serializeMessages(favoriteMessages));
+    } catch (e) {
+      console.error('Failed to save favorites:', e);
+    }
+  }, [favoriteMessages]);
 
   const sendMessage = useCallback(async (content: string, imageUrl?: string) => {
     const userMessage: Message = {
@@ -305,7 +329,20 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
     setMessages(prev => prev.map(m => 
       m.id === messageId ? { ...m, starred: !m.starred } : m
     ));
-  }, []);
+
+    setFavoriteMessages(prev => {
+      const isAlreadyStarred = prev.some(m => m.id === messageId);
+      if (isAlreadyStarred) {
+        return prev.filter(m => m.id !== messageId);
+      } else {
+        const targetMsg = messages.find(m => m.id === messageId) || prev.find(m => m.id === messageId);
+        if (targetMsg) {
+          return [...prev, { ...targetMsg, starred: true }];
+        }
+        return prev;
+      }
+    });
+  }, [messages]);
 
   // 编辑消息内容
   const editMessage = useCallback((messageId: string, newContent: string) => {
@@ -316,8 +353,8 @@ export function useChat(settings: AppSettings, systemPrompt: string) {
 
   // 获取收藏的消息
   const starredMessages = useMemo(() => 
-    messages.filter(m => m.starred), 
-    [messages]
+    favoriteMessages.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()), 
+    [favoriteMessages]
   );
 
   return {
