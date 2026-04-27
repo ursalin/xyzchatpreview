@@ -1,41 +1,130 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- TODO: Set the document title to the name of your application -->
-    <title>Lovable App</title>
-    <meta name="description" content="Lovable Generated Project" />
-    <meta name="author" content="Lovable" />
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live2D Display</title>
+    <!-- Load PixiJS and Live2D -->
+    <script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pixi.js@7.4.2/dist/pixi.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display/dist/index.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background-color: #2c2c2c; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
+        canvas { display: block; border: 1px solid #444; background-color: #1a1a1a; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+        #controls { position: absolute; top: 20px; left: 20px; z-index: 10; background: rgba(255, 255, 255, 0.9); padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); font-family: sans-serif; }
+        button { padding: 10px 20px; font-size: 16px; background-color: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; transition: background 0.2s; }
+        button:hover { background-color: #45a049; }
+        button:active { background-color: #3d8b40; }
+        #status { margin-top: 10px; font-weight: bold; color: #333; }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <button id="btnTalk">按住模拟说话</button>
+        <div id="status">状态: 空闲 (视线跟随鼠标)</div>
+    </div>
+    <canvas id="canvas"></canvas>
 
-    <!-- TODO: Update og:title to match your application name -->
-    <meta property="og:title" content="Lovable App" />
-    <meta property="og:description" content="Lovable Generated Project" />
-    <meta property="og:type" content="website" />
-    <meta property="og:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
-
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@Lovable" />
-    <meta name="twitter:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
-  </head>
-
-  <body>
-    <div id="root"></div>
     <script>
-      // 全局错误捕获 - 白屏调试用
-      window.onerror = function(msg, src, line, col, err) {
-        var d = document.createElement('div');
-        d.style.cssText = 'position:fixed;top:0;left:0;right:0;padding:16px;background:red;color:white;font-size:12px;z-index:99999;word-break:break-all;';
-        d.textContent = 'Error: ' + msg + ' at ' + src + ':' + line;
-        document.body.appendChild(d);
-      };
-      window.addEventListener('unhandledrejection', function(e) {
-        var d = document.createElement('div');
-        d.style.cssText = 'position:fixed;top:0;left:0;right:0;padding:16px;background:red;color:white;font-size:12px;z-index:99999;word-break:break-all;';
-        d.textContent = 'Promise Error: ' + (e.reason && e.reason.message || e.reason || 'unknown');
-        document.body.appendChild(d);
-      });
+        const app = new PIXI.Application({
+            view: document.getElementById('canvas'),
+            width: 800,
+            height: 800,
+            autoStart: true,
+            backgroundAlpha: 0
+        });
+
+        // 这个是敖澜（AoLan）的测试模型
+        const modelUrl = "https://cdn.jsdelivr.net/gh/ursalin/live2d-models/AoLan/aolan.model3.json";
+        
+        let currentModel = null;
+        let isTalking = false;
+        let talkTimer = null;
+        let currentMouthOpen = 0;
+        let targetMouthOpen = 0;
+        let returnToCenterProgress = 0; // 0-1 的平滑系数，用于视线回正
+
+        PIXI.live2d.Live2DModel.from(modelUrl, { autoInteract: false }).then(model => {
+            currentModel = model;
+            app.stage.addChild(model);
+            
+            // 调整模型大小和位置
+            model.scale.set(0.3);
+            model.x = app.view.width / 2;
+            model.y = app.view.height / 2 + 100;
+            model.anchor.set(0.5, 0.5);
+            
+            // 启用鼠标跟随交互
+            model.on('pointermove', (event) => {
+                if (!isTalking) {
+                    model.focus(event.data.global.x, event.data.global.y);
+                }
+            });
+
+            // 拦截原始的视线更新逻辑，以便我们接管
+            app.ticker.add(() => {
+                if (!currentModel || !currentModel.internalModel || !currentModel.internalModel.coreModel) return;
+
+                // --- 1. 视线控制 ---
+                if (isTalking) {
+                    // 说话时，平滑地把视线拉回正中心 (0, 0)
+                    returnToCenterProgress = Math.min(1, returnToCenterProgress + 0.1); // 0.1 控制回正速度
+                    
+                    // 获取当前的实际鼠标位置 (相对于屏幕中心)
+                    const mousePos = app.renderer.plugins.interaction.mouse.global;
+                    
+                    // 插值：从当前鼠标位置平滑过渡到中心点 (0, 0)
+                    // 由于 pixi-live2d-display 的 focus 方法内部有自己的平滑，
+                    // 我们只需不断给它发送逐渐逼近中心的坐标即可
+                    const centerX = app.view.width / 2;
+                    const centerY = app.view.height / 2;
+                    
+                    // 强制焦点归零 (看向正前方)
+                    model.focus(centerX, centerY);
+                } else {
+                    returnToCenterProgress = 0;
+                }
+                
+                // --- 2. 嘴巴平滑控制 ---
+                // EMA 平滑公式: current = current + (target - current) * alpha
+                // 闭嘴(target=0)比张嘴(target>0)快
+                const alpha = targetMouthOpen === 0 ? 0.3 : 0.15; 
+                currentMouthOpen = currentMouthOpen + (targetMouthOpen - currentMouthOpen) * alpha;
+                
+                // 设置嘴巴参数 (注：确保 AoLan 模型的嘴巴参数名是 ParamMouthOpenY)
+                currentModel.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', currentMouthOpen);
+            });
+        });
+
+        // 按钮交互逻辑
+        const btnTalk = document.getElementById('btnTalk');
+        const statusEl = document.getElementById('status');
+
+        const startTalking = () => {
+            isTalking = true;
+            statusEl.innerText = "状态: 说话中 (视线直视屏幕)";
+            statusEl.style.color = "#d32f2f";
+            
+            // 模拟说话时的嘴型跳动
+            talkTimer = setInterval(() => {
+                targetMouthOpen = Math.random() * 0.8 + 0.2;
+            }, 120); 
+        };
+
+        const stopTalking = () => {
+            if (!isTalking) return;
+            isTalking = false;
+            statusEl.innerText = "状态: 空闲 (视线跟随鼠标)";
+            statusEl.style.color = "#333";
+            clearInterval(talkTimer);
+            targetMouthOpen = 0; 
+        };
+
+        btnTalk.addEventListener('mousedown', startTalking);
+        btnTalk.addEventListener('mouseup', stopTalking);
+        btnTalk.addEventListener('mouseleave', stopTalking);
+        btnTalk.addEventListener('touchstart', (e) => { e.preventDefault(); startTalking(); });
+        btnTalk.addEventListener('touchend', stopTalking);
     </script>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+</body>
 </html>
